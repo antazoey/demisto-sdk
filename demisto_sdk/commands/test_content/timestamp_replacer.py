@@ -5,7 +5,7 @@ DO NOT import anything from custom packages, only use builtins.
 """
 
 import functools
-import json  # noqa: TID251
+import json
 import logging
 import urllib.parse
 from ast import literal_eval
@@ -163,7 +163,9 @@ class TimestampReplacer:
         req.headers["Content-Type"] = "boundary=".join(
             [content_type_header, fixed_boundary]
         )
-        req.content = req.content.replace(old_boundary.encode(), fixed_boundary.encode())  # type: ignore
+        req.content = req.content.replace(  # type: ignore[union-attr]
+            old_boundary.encode(), fixed_boundary.encode()
+        )
 
     def clean_bad_keys(self, req: Request) -> None:
         """Modify the request so that values of problematic keys are constant data

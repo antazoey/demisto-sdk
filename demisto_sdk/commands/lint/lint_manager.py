@@ -1,7 +1,6 @@
 # STD packages
 import concurrent.futures
 import os
-import platform
 import re
 import sys
 import textwrap
@@ -12,7 +11,6 @@ import docker.errors
 import git
 import requests.exceptions
 import urllib3.exceptions
-from packaging.version import Version
 from wcmatch.pathlib import Path, PosixPath
 
 import demisto_sdk
@@ -67,14 +65,15 @@ class LintManager:
 
     Attributes:
         input(str): Directories to run lint on.
-        git(bool): Perform lint and test only on chaged packs.
+        git(bool): Perform lint and test only on changed packs.
         all_packs(bool): Whether to run on all packages.
         log_path(str): Path to all levels of logs.
         prev_ver(str): Previous branch or SHA1 commit to run checks against.
-        json_file_path(str): Path to a json file to write the run resutls to.
+        json_file_path(str): Path to a json file to write the run results to.
         id_set_path(str): Path to an existing id_set.json.
         check_dependent_api_module(bool): Whether to run lint also on the packs dependent on the modified api modules
         files.
+        show_deprecation_message (bool): Whether to show deprecation alert or not.
     """
 
     def __init__(
@@ -85,8 +84,8 @@ class LintManager:
         prev_ver: str,
         json_file_path: str = "",
         check_dependent_api_module: bool = False,
+        show_deprecation_message: bool = True,
     ):
-
         # Gather facts for manager
         self._facts: dict = self._gather_facts()
         self._prev_ver = prev_ver
@@ -102,6 +101,7 @@ class LintManager:
             all_packs=all_packs,
             base_branch=self._prev_ver,
         )
+        self.show_deprecation_message = show_deprecation_message
 
         if check_dependent_api_module:
             dependent_on_api_module = self._get_api_module_dependent_items()
@@ -157,7 +157,7 @@ class LintManager:
 
             if dependent_on_api_module:
                 logger.info(
-                    f"Found [cyan]{len(dependent_on_api_module)}[/cyan] dependent packages. "
+                    f"Found <cyan>{len(dependent_on_api_module)}</cyan> dependent packages. "
                     f"Executing lint and test on those as well."
                 )
                 return dependent_on_api_module
@@ -186,8 +186,8 @@ class LintManager:
         # Get content repo object
         is_external_repo = False
         try:
-            git_repo = GitUtil().repo
-            remote_url = git_repo.remote().urls.__next__()
+            git_repo = GitUtil()
+            remote_url = git_repo.repo.remote().urls.__next__()
             is_fork_repo = "content" in remote_url
             is_external_repo = is_external_repository()
 
@@ -195,10 +195,10 @@ class LintManager:
                 raise git.InvalidGitRepositoryError
 
             facts["content_repo"] = git_repo  # type: ignore
-            logger.debug(f"Content path {git_repo.working_dir}")
+            logger.debug(f"Content path {git_repo.repo.working_dir}")
         except (git.InvalidGitRepositoryError, git.NoSuchPathError) as e:
-            logger.info(
-                "[yellow]You are running demisto-sdk lint not in content repository![yellow]"
+            logger.warning(
+                "<yellow>You are running demisto-sdk lint not in content repository!</yellow>"
             )
             logger.warning(f"can't locate content repo {e}")
         # Get global requirements file
@@ -230,8 +230,8 @@ class LintManager:
             urllib3.exceptions.NewConnectionError,
         ) as e:
             logger.info(
-                "[red]Unable to get mandatory test-modules demisto-mock.py etc - Aborting! (Check your internet "
-                "connection)[/red]"
+                "<red>Unable to get mandatory test-modules demisto-mock.py etc - Aborting! (Check your internet "
+                "connection)</red>"
             )
             logger.error(
                 f"demisto-sdk-unable to get mandatory test-modules demisto-mock.py etc {e}"
@@ -241,7 +241,9 @@ class LintManager:
         logger.debug("creating docker client from env")
 
         try:
-            docker_client: docker.DockerClient = init_global_docker_client(log_prompt="LintManager")  # type: ignore
+            docker_client: docker.DockerClient = init_global_docker_client(
+                log_prompt="LintManager"
+            )  # type: ignore
             logger.debug("pinging docker daemon")
             docker_client.ping()
         except (
@@ -257,9 +259,9 @@ class LintManager:
                     "Docker engine not available and we are in content CI env. Can not run lint!!"
                 ) from ex
             facts["docker_engine"] = False
-            logger.info(
-                "[yellow]Can't communicate with Docker daemon - check your docker Engine is ON - Skipping lint, "
-                "test which require docker![yellow]"
+            logger.warning(
+                "<yellow>Can't communicate with Docker daemon - check your docker Engine is ON - Skipping lint, "
+                "test which require docker!</yellow>"
             )
             logger.info("can not communicate with Docker daemon")
         logger.debug("Docker daemon test passed")
@@ -267,7 +269,7 @@ class LintManager:
 
     def _get_packages(
         self,
-        content_repo: git.Repo,  # noqa: TID251
+        content_repo: GitUtil,
         input: Union[str, List[str]],
         git: bool = False,
         all_packs: bool = False,
@@ -287,7 +289,9 @@ class LintManager:
         """
         pkgs: list
         if all_packs or git:
-            pkgs = LintManager._get_all_packages(content_dir=content_repo.working_dir)  # type: ignore
+            pkgs = LintManager._get_all_packages(
+                content_dir=content_repo.repo.working_dir  # type: ignore[arg-type]
+            )
         else:  # specific pack as input, -i flag has been used
             pkgs = []
             if isinstance(input, str):
@@ -306,11 +310,11 @@ class LintManager:
                 content_repo=content_repo, pkgs=pkgs, base_branch=base_branch
             )
             for pkg in pkgs:
-                logger.debug(f"Found changed package [cyan]{pkg}[/cyan]")
+                logger.debug(f"Found changed package <cyan>{pkg}</cyan>")
         if pkgs:
             pkgs_str = ", ".join(map(str, pkgs))
             logger.info(
-                f"Executing lint and test on integrations and scripts in [cyan]{pkgs_str}[/cyan]"
+                f"Executing lint and test on integrations and scripts in <cyan>{pkgs_str}</cyan>"
             )
 
         return pkgs
@@ -359,7 +363,7 @@ class LintManager:
 
     @staticmethod
     def _filter_changed_packages(
-        content_repo: git.Repo, pkgs: List[PosixPath], base_branch: str  # noqa: TID251
+        content_repo: GitUtil, pkgs: List[PosixPath], base_branch: str
     ) -> List[PosixPath]:
         """Checks which packages had changes in them and should run on Lint.
         The diff is calculated using git, and is done by the following cases:
@@ -375,21 +379,35 @@ class LintManager:
         Returns:
             List[PosixPath]: A list of names of packages that should run.
         """
+        try:
+            active_branch = content_repo.repo.active_branch
+            commit = active_branch.commit
+            branch_name = active_branch.name
+        except TypeError as error:
+            logger.debug(f"Could not get active branch, {error}")
+            commit = content_repo.get_commit(
+                content_repo.repo.head.object.hexsha, from_remote=False
+            )
+            branch_name = ""
+
+        logger.debug(f"{commit=}, {branch_name=}")
 
         staged_files = {
-            content_repo.working_dir / Path(item.b_path).parent  # type: ignore[operator]
-            for item in content_repo.active_branch.commit.tree.diff(None, paths=pkgs)
+            content_repo.repo.working_dir / Path(item.b_path).parent  # type: ignore[operator]
+            for item in commit.tree.diff(None, paths=pkgs)
         }
 
         if (
             base_branch == DEMISTO_GIT_PRIMARY_BRANCH
-            and content_repo.active_branch.name == DEMISTO_GIT_PRIMARY_BRANCH
+            and branch_name == DEMISTO_GIT_PRIMARY_BRANCH
         ):
             # case 1: comparing master against the latest previous commit
-            last_common_commit = content_repo.remote().refs.master.commit.parents[0]
+            last_common_commit = (
+                content_repo.repo.remote().refs[base_branch].commit.parents[0]
+            )
             logger.info(
-                f"Comparing [cyan]master[/cyan] to its [cyan]previous commit: "
-                f"{last_common_commit}"
+                f"Comparing <cyan>master</cyan> to its previous commit "
+                f"<cyan>{last_common_commit}</cyan>"
             )
 
         else:
@@ -399,20 +417,19 @@ class LintManager:
             ):  # if the base branch is given as a commit hash
                 last_common_commit = base_branch
             else:
-                last_common_commit = content_repo.merge_base(
-                    content_repo.active_branch.commit,
-                    f"{content_repo.remote()}/{base_branch}",
+                last_common_commit = content_repo.repo.merge_base(
+                    commit,
+                    f"{content_repo.repo.remote()}/{base_branch}",
                 )[0]
-            logger.info(
-                f"Comparing [cyan]{content_repo.active_branch}[/cyan] to"
-                f" last common commit with [cyan]{last_common_commit}[/cyan]"
-            )
+            if branch_name:
+                logger.info(
+                    f"Comparing <cyan>{branch_name}</cyan> to"
+                    f" last common commit with <cyan>{last_common_commit}</cyan>"
+                )
 
         changed_from_base = {
-            content_repo.working_dir / Path(item.b_path).parent  # type: ignore[operator]
-            for item in content_repo.active_branch.commit.tree.diff(
-                last_common_commit, paths=pkgs
-            )
+            content_repo.repo.working_dir / Path(item.b_path).parent  # type: ignore[operator]
+            for item in commit.tree.diff(last_common_commit, paths=pkgs)
         }
         all_changed = staged_files.union(changed_from_base)
         pkgs_to_check = all_changed.intersection(pkgs)
@@ -478,10 +495,12 @@ class LintManager:
                 for pack in sorted(self._pkgs):
                     linter: Linter = Linter(
                         pack_dir=pack,
-                        content_repo=""
-                        if not self._facts["content_repo"]
-                        else Path(  # type: ignore
-                            self._facts["content_repo"].working_dir
+                        content_repo=(
+                            ""
+                            if not self._facts["content_repo"]
+                            else Path(  # type: ignore
+                                self._facts["content_repo"].repo.working_dir
+                            )
                         ),
                         docker_engine=self._facts["docker_engine"],
                         docker_timeout=docker_timeout,
@@ -509,11 +528,11 @@ class LintManager:
                         )
                     )
 
-                logger.info("Waiting for futures to complete")
+                logger.debug("Waiting for futures to complete")
                 for i, future in enumerate(concurrent.futures.as_completed(results)):
                     logger.debug(f"checking output of future {i=}")
                     pkg_status = future.result()
-                    logger.info(f'Got lint results for {pkg_status["pkg"]}')
+                    logger.debug(f'Got lint results for {pkg_status["pkg"]}')
                     pkgs_status[pkg_status["pkg"]] = pkg_status
                     if pkg_status["exit_code"]:
                         for check, code in EXIT_CODES.items():
@@ -534,29 +553,20 @@ class LintManager:
                             return_warning_code += pkg_status["warning_code"]
                     if pkg_status["pack_type"] not in pkgs_type:
                         pkgs_type.append(pkg_status["pack_type"])
-                logger.info("Finished all futures")
+                logger.debug("Finished all futures")
                 return return_exit_code, return_warning_code
         except KeyboardInterrupt:
             msg = "Stop demisto-sdk lint - Due to 'Ctrl C' signal"
-            logger.info(f"[yellow]{msg}[/yellow]")
+            logger.info(f"<yellow>{msg}</yellow>")
             logger.warning(msg)
             executor.shutdown(
                 wait=False
             )  # If keyboard interrupt no need to wait to clean resources
             return 1, 0
         except Exception as e:
-            msg = f"Stop demisto-sdk lint - Due to Exception {e}"
-            logger.error(f"[yellow]{msg}[/yellow]")
-
-            if Version(platform.python_version()) > Version("3.9"):
-                executor.shutdown(wait=True, cancel_futures=True)  # type: ignore[call-arg]
-            else:
-                logger.info("Using Python under 3.8, we will cancel futures manually.")
-                executor.shutdown(
-                    wait=True
-                )  # Note that `cancel_futures` not supported in python 3.8
-                for res in results:
-                    res.cancel()
+            msg = f"Stop demisto-sdk lint - {e}"
+            logger.debug("{}", msg, exc_info=True)  # noqa: PLE1205
+            executor.shutdown(wait=True, cancel_futures=True)  # type: ignore[call-arg]
             return 1, 0
 
     def run(
@@ -709,6 +719,12 @@ class LintManager:
                 return_exit_code = SUCCESS
             else:
                 return_exit_code = FAIL
+
+        if self.show_deprecation_message:
+            logger.error(
+                "This command is deprecated and will be removed soon. Use the `demisto-sdk pre-commit` command instead."
+            )
+
         return return_exit_code
 
     def _report_results(
@@ -798,13 +814,13 @@ class LintManager:
                 check in PWSH_CHECKS and TYPE_PWSH in pkgs_type
             ):
                 if code & skipped_code:
-                    logger.info(f"{check_str} {' ' * spacing}- [cyan][SKIPPED][/cyan]")
+                    logger.info(f"{check_str} {' ' * spacing}- <cyan>[SKIPPED]</cyan>")
                 elif code & return_exit_code:
-                    logger.info(f"{check_str} {' ' * spacing}- [red][FAIL][/red]")
+                    logger.info(f"{check_str} {' ' * spacing}- <red>[FAIL]</red>")
                 else:
-                    logger.info(f"{check_str} {' ' * spacing}- [green][PASS][/green]")
+                    logger.info(f"{check_str} {' ' * spacing}- <green>[PASS]</green>")
             elif check != "image":
-                logger.info(f"{check_str} {' ' * spacing}- [cyan][SKIPPED][/cyan]")
+                logger.info(f"{check_str} {' ' * spacing}- <cyan>[SKIPPED]</cyan>")
 
     def report_failed_lint_checks(
         self, lint_status: dict, pkgs_status: dict, return_exit_code: int
@@ -819,11 +835,11 @@ class LintManager:
         for check in ["flake8", "XSOAR_linter", "bandit", "mypy", "vulture"]:
             if EXIT_CODES[check] & return_exit_code:
                 sentence = f" {check.capitalize()} errors "
-                logger.info(f"\n[red]{'#' * len(sentence)}[/red]")
-                logger.info(f"[red]{sentence}[/red]")
-                logger.info(f"[red]{'#' * len(sentence)}[/red]\n")
+                logger.info(f"\n<red>{'#' * len(sentence)}</red>")
+                logger.info(f"<red>{sentence}</red>")
+                logger.info(f"<red>{'#' * len(sentence)}</red>\n")
                 for fail_pack in lint_status[f"fail_packs_{check}"]:
-                    logger.info(f"[red]{pkgs_status[fail_pack]['pkg']}[/red]")
+                    logger.info(f"<red>{pkgs_status[fail_pack]['pkg']}</red>")
                     logger.info(pkgs_status[fail_pack][f"{check}_errors"])
                     self.linters_error_list.append(
                         {
@@ -838,11 +854,11 @@ class LintManager:
             check_str = check.capitalize().replace("_", " ")
             if EXIT_CODES[check] & return_exit_code:
                 sentence = f" {check_str} errors "
-                logger.info(f"\n[red]{'#' * len(sentence)}[/red]")
-                logger.info(f"[red]{sentence}[/red]")
-                logger.info(f"[red]{'#' * len(sentence)}[/red]\n")
+                logger.info(f"\n<red>{'#' * len(sentence)}</red>")
+                logger.info(f"<red>{sentence}</red>")
+                logger.info(f"<red>{'#' * len(sentence)}</red>\n")
                 for fail_pack in lint_status[f"fail_packs_{check}"]:
-                    logger.info(f"[red]{fail_pack}[/red]")
+                    logger.info(f"<red>{fail_pack}</red>")
                     for image in pkgs_status[fail_pack]["images"]:
                         logger.info(image[f"{check}_errors"])
 
@@ -865,11 +881,13 @@ class LintManager:
             for check in ["flake8", "XSOAR_linter", "bandit", "mypy", "vulture"]:
                 if EXIT_CODES[check] & return_warning_code:
                     sentence = f" {check.capitalize()} warnings "
-                    logger.info(f"\n[orange]{'#' * len(sentence)}[/orange]")
-                    logger.info(f"[orange]{sentence}[/orange]")
-                    logger.info(f"[orange]{'#' * len(sentence)}[/orange]\n")
+                    logger.info(f"\n<fg #FFA500>{'#' * len(sentence)}</fg #FFA500>")
+                    logger.info(f"<fg #FFA500>{sentence}</fg #FFA500>")
+                    logger.info(f"<fg #FFA500>{'#' * len(sentence)}</fg #FFA500>\n")
                     for fail_pack in lint_status[f"warning_packs_{check}"]:
-                        logger.info(f"[orange]{pkgs_status[fail_pack]['pkg']}[/orange]")
+                        logger.info(
+                            f"<fg #FFA500>{pkgs_status[fail_pack]['pkg']}</fg #FFA500>"
+                        )
                         logger.info(pkgs_status[fail_pack][f"{check}_warnings"])
                         self.linters_error_list.append(
                             {
@@ -943,14 +961,14 @@ class LintManager:
                     ):
                         # Log unit-tests
                         sentence = " Unit Tests "
-                        logger.debug(f"\n[cyan]{'#' * len(sentence)}")
+                        logger.debug(f"\n<cyan>{'#' * len(sentence)}</cyan>")
                         logger.debug(f"{sentence}")
                         logger.debug(f"{'#' * len(sentence)}")
                         headline_printed = True
                     if not passed_printed:
-                        logger.debug("\n[green]Passed Unit-tests:[/green]")
+                        logger.debug("\n<green>Passed Unit-tests:</green>")
                         passed_printed = True
-                    logger.debug(wrapper_pack.fill(f"[green]{pkg}[/green]"))
+                    logger.debug(wrapper_pack.fill(f"<green>{pkg}</green>"))
                     for image in status["images"]:
                         if not image.get("image_errors"):
                             tests = (
@@ -977,12 +995,12 @@ class LintManager:
             if not headline_printed:
                 # Log unit-tests
                 sentence = " Unit Tests "
-                logger.info(f"\n[cyan]{'#' * len(sentence)}")
+                logger.info(f"\n<cyan>{'#' * len(sentence)}</cyan>")
                 logger.info(f"{sentence}")
                 logger.info(f"{'#' * len(sentence)}")
-            logger.info("\n[red]Failed Unit-tests:[/red]")
+            logger.info("\n<red>Failed Unit-tests:</red>")
             for fail_pack in lint_status["fail_packs_pytest"]:
-                logger.info(wrapper_pack.fill(f"[red]{fail_pack}[/red]"))
+                logger.info(wrapper_pack.fill(f"<red>{fail_pack}</red>"))
                 for image in pkgs_status[fail_pack]["images"]:
                     tests = image.get("pytest_json", {}).get("report", {}).get("tests")
                     if tests:
@@ -1060,11 +1078,11 @@ class LintManager:
         # Log failed images creation
         if EXIT_CODES["image"] & return_exit_code:
             sentence = " Image creation errors "
-            logger.info(f"\n[red]{'#' * len(sentence)}[/red]")
-            logger.info(f"[red]{sentence}[/red]")
-            logger.info(f"[red]{'#' * len(sentence)}[/red]")
+            logger.info(f"\n<red>{'#' * len(sentence)}</red>")
+            logger.info(f"<red>{sentence}</red>")
+            logger.info(f"<red>{'#' * len(sentence)}</red>")
             for fail_pack in lint_status["fail_packs_image"]:
-                logger.info(wrapper_pack.fill(f"[cyan]{fail_pack}[/cyan]"))
+                logger.info(wrapper_pack.fill(f"<cyan>{fail_pack}</cyan>"))
                 for image in pkgs_status[fail_pack]["images"]:
                     logger.info(wrapper_image.fill(image["image"]))
                     logger.info(wrapper_error.fill(image["image_errors"]))
@@ -1073,7 +1091,7 @@ class LintManager:
     def report_summary(
         pkg, pkgs_status: dict, lint_status: dict, all_packs: bool = False
     ):
-        """Log failed image creation if occured
+        """Log failed image creation if occurred
 
         Args:
             pkgs_status: The packs status
@@ -1123,26 +1141,29 @@ class LintManager:
             )
         # Log unit-tests summary
         sentence = " Summary "
-        logger.info(f"\n[cyan]{'#' * len(sentence)}")
+        logger.info(f"\n<cyan>{'#' * len(sentence)}</cyan>")
         logger.info(f"{sentence}")
         logger.info(f"{'#' * len(sentence)}")
         logger.info(f"Packages: {len(pkg)}")
-        logger.info(f"Packages PASS: [green]{num_passed}[/green]")
-        logger.info(f"Packages FAIL: [red]{len(failed)}[/red]")
+        logger.info(f"Packages PASS: <green>{num_passed}</green>")
+        logger.info(f"Packages FAIL: <red>{len(failed)}</red>")
         logger.info(
-            f"Packages WARNING (can either PASS or FAIL): [orange]{len(warnings)}[/orange]\n"
+            f"Packages WARNING (can either PASS or FAIL): <fg #FFA500>{len(warnings)}</fg #FFA500>\n"
         )
 
         if not all_packs:
             if warnings:
                 logger.info("Warning packages:")
             for warning in warnings:
-                logger.info(f"[orange]{wrapper_fail_pack.fill(warning)}[/orange]")
+                logger.info(
+                    f"<fg #FFA500>{wrapper_fail_pack.fill(warning)}</fg #FFA500>"
+                )
 
         if failed:
             logger.info("Failed packages:")
         for fail_pack in failed:
-            logger.info(f"[red]{wrapper_fail_pack.fill(fail_pack)}[/red]")
+            if fail_pack:
+                logger.info(f"<red>{wrapper_fail_pack.fill(fail_pack)}</red>")
 
     @staticmethod
     def _create_failed_packs_report(lint_status: dict, path: str):
@@ -1170,9 +1191,10 @@ class LintManager:
                 key.startswith("fail") and "mypy" not in key
             ):  # TODO remove this when reduce the number of failed `mypy` packages.
                 failed_ut = failed_ut.union(lint_status[key])
-        if path and failed_ut:
+        failed_unit_tests = [str(item) for item in failed_ut if item is not None]
+        if path and failed_unit_tests:
             file_path = Path(path) / "failed_lint_report.txt"
-            file_path.write_text("\n".join(failed_ut))
+            file_path.write_text("\n".join(failed_unit_tests))
 
     def create_json_output(self):
         """Creates a JSON file output for lints"""
@@ -1360,9 +1382,11 @@ class LintManager:
                     "linter": "xsoar_linter",
                     "severity": errors.get("type"),
                     "errorCode": code,
-                    "message": message.split(code)[-1].lstrip()
-                    if len(message.split(code)) >= 1
-                    else "",
+                    "message": (
+                        message.split(code)[-1].lstrip()
+                        if len(message.split(code)) >= 1
+                        else ""
+                    ),
                     "row": split_message[1] if len(split_message) >= 2 else "",
                     "col": split_message[2] if len(split_message) >= 3 else "",
                 }

@@ -1,36 +1,47 @@
-import enum
 import os
 import re
 from pathlib import Path
-from typing import Any, Callable, Dict, Iterator, List, NamedTuple, Set
+from typing import Any, Callable, Dict, Iterator, List, NamedTuple, Optional, Set
 
 from neo4j import graph
+from pydantic import BaseModel
+from ruamel.yaml.scalarstring import (  # noqa: TID251 - only importing FoldedScalarString is OK
+    FoldedScalarString,
+)
 
-from demisto_sdk.commands.common.constants import PACKS_FOLDER
+from demisto_sdk.commands.common.constants import (
+    DEMISTO_SDK_NEO4J_DATABASE_HTTP,
+    DEMISTO_SDK_NEO4J_DATABASE_URL,
+    DEMISTO_SDK_NEO4J_PASSWORD,
+    DEMISTO_SDK_NEO4J_USERNAME,
+    PACKS_FOLDER,
+    MarketplaceVersions,
+)
 from demisto_sdk.commands.common.git_content_config import GitContentConfig
+from demisto_sdk.commands.common.logger import logger
+from demisto_sdk.commands.common.StrEnum import StrEnum
 from demisto_sdk.commands.common.tools import (
+    get_dict_from_file,
     get_json,
     get_remote_file,
+    pascalToSpace,
 )
 
 NEO4J_ADMIN_DOCKER = ""
 
 NEO4J_DATABASE_HTTP = os.getenv(
-    "DEMISTO_SDK_NEO4J_DATABASE_HTTP", "http://127.0.0.1:7474"
+    DEMISTO_SDK_NEO4J_DATABASE_HTTP, "http://127.0.0.1:7474"
 )
-NEO4J_DATABASE_URL = os.getenv(
-    "DEMISTO_SDK_NEO4J_DATABASE_URL", "neo4j://127.0.0.1:7687"
-)
-NEO4J_USERNAME = os.getenv("DEMISTO_SDK_NEO4J_USERNAME", "neo4j")
-NEO4J_PASSWORD = os.getenv("DEMISTO_SDK_NEO4J_PASSWORD", "contentgraph")
-
-NEO4J_FOLDER = "neo4j-data"
+NEO4J_DATABASE_URL = os.getenv(DEMISTO_SDK_NEO4J_DATABASE_URL, "neo4j://127.0.0.1:7687")
+NEO4J_USERNAME = os.getenv(DEMISTO_SDK_NEO4J_USERNAME, "neo4j")
+NEO4J_PASSWORD = os.getenv(DEMISTO_SDK_NEO4J_PASSWORD, "contentgraph")
 
 PACK_METADATA_FILENAME = "pack_metadata.json"
+VERSION_CONFIG_FILENAME = "version_config.json"
 PACK_CONTRIBUTORS_FILENAME = "CONTRIBUTORS.json"
 UNIFIED_FILES_SUFFIXES = [".yml", ".json"]
 
-SERVER_CONTENT_ITEMS_PATH = "Tests/Marketplace/server_content_items.json"
+SERVER_CONTENT_ITEMS_PATH = Path("Tests/Marketplace/server_content_items.json")
 
 
 class Neo4jRelationshipResult(NamedTuple):
@@ -39,7 +50,7 @@ class Neo4jRelationshipResult(NamedTuple):
     nodes_to: List[graph.Node]
 
 
-class RelationshipType(str, enum.Enum):
+class RelationshipType(StrEnum):
     DEPENDS_ON = "DEPENDS_ON"
     HAS_COMMAND = "HAS_COMMAND"
     IMPORTS = "IMPORTS"
@@ -48,18 +59,18 @@ class RelationshipType(str, enum.Enum):
     USES = "USES"
     USES_BY_ID = "USES_BY_ID"
     USES_BY_NAME = "USES_BY_NAME"
+    USES_BY_CLI_NAME = "USES_BY_CLI_NAME"
     USES_COMMAND_OR_SCRIPT = "USES_COMMAND_OR_SCRIPT"
     USES_PLAYBOOK = "USES_PLAYBOOK"
 
 
-class ContentType(str, enum.Enum):
+class ContentType(StrEnum):
     BASE_CONTENT = "BaseContent"
     BASE_NODE = "BaseNode"
     BASE_PLAYBOOK = "BasePlaybook"
     CLASSIFIER = "Classifier"
     COMMAND = "Command"
     COMMAND_OR_SCRIPT = "CommandOrScript"
-    CONNECTION = "Connection"
     CORRELATION_RULE = "CorrelationRule"
     DASHBOARD = "Dashboard"
     GENERIC_DEFINITION = "GenericDefinition"
@@ -92,6 +103,10 @@ class ContentType(str, enum.Enum):
     WIZARD = "Wizard"
     XDRC_TEMPLATE = "XDRCTemplate"
     LAYOUT_RULE = "LayoutRule"
+    ASSETS_MODELING_RULE = "AssetsModelingRule"
+    CASE_LAYOUT_RULE = "CaseLayoutRule"
+    CASE_FIELD = "CaseField"
+    CASE_LAYOUT = "CaseLayout"
 
     @property
     def labels(self) -> List[str]:
@@ -119,7 +134,9 @@ class ContentType(str, enum.Enum):
             return "reputation"
         elif self == ContentType.INDICATOR_FIELD:
             return "incidentfield-indicatorfield"
-        elif self == ContentType.LAYOUT:
+        elif self == ContentType.CASE_FIELD:
+            return "casefield"
+        elif self in (ContentType.LAYOUT, ContentType.CASE_LAYOUT):
             return "layoutscontainer"
         elif self == ContentType.PREPROCESS_RULE:
             return "preprocessrule"
@@ -138,7 +155,7 @@ class ContentType(str, enum.Enum):
             return "automation"
         elif self == ContentType.INDICATOR_TYPE:
             return "reputation"
-        elif self == ContentType.LAYOUT:
+        elif self in (ContentType.LAYOUT, ContentType.CASE_LAYOUT):
             return "layoutscontainer"
         elif self == ContentType.TEST_PLAYBOOK:
             return ContentType.PLAYBOOK.server_name
@@ -154,7 +171,7 @@ class ContentType(str, enum.Enum):
             return "Reputation"
         elif self == ContentType.MAPPER:
             return "Classifier"
-        elif self == ContentType.LAYOUT:
+        elif self in (ContentType.LAYOUT, ContentType.CASE_LAYOUT):
             return "Layouts Container"
         else:
             return re.sub(r"([a-z](?=[A-Z])|[A-Z](?=[A-Z][a-z]))", r"\1 ", self.value)
@@ -244,16 +261,102 @@ class ContentType(str, enum.Enum):
                         if tir_folder.is_dir() and not tir_folder.name.startswith("."):
                             yield tir_folder
 
+    @staticmethod
+    def by_schema(path: Path, git_sha: Optional[str] = None) -> "ContentType":
+        """
+        Determines a content type value of a given file by accessing it and making minimal checks on its schema.
+        """
+        from demisto_sdk.commands.content_graph.objects.base_content import (
+            CONTENT_TYPE_TO_MODEL,
+        )
+
+        parsed_dict = get_dict_from_file(str(path), git_sha=git_sha)
+        if parsed_dict and isinstance(parsed_dict, tuple):
+            _dict = parsed_dict[0]
+        else:
+            _dict = parsed_dict
+        for content_type in ContentType.content_items():
+            if content_type_obj := CONTENT_TYPE_TO_MODEL.get(content_type):
+                if content_type_obj.match(_dict, path):
+                    return content_type
+        raise ValueError(f"Could not find content type in path {path}")
+
+    @property
+    def as_rn_header(self) -> str:
+        """
+        Convert ContentType to the Release note header.
+        """
+        if self == ContentType.PREPROCESS_RULE:
+            return "PreProcess Rules"
+        elif self == ContentType.TRIGGER:
+            return "Triggers Recommendations"  # https://github.com/demisto/etc/issues/48153#issuecomment-1111988526
+        elif self == ContentType.XSIAM_REPORT:
+            return "XSIAM Reports"
+        elif self == ContentType.XDRC_TEMPLATE:
+            return "XDRC Templates"
+        elif self == ContentType.XSIAM_DASHBOARD:
+            return "XSIAM Dashboards"
+        elif self == ContentType.GENERIC_TYPE:
+            return "Object Types"
+        elif self == ContentType.GENERIC_FIELD:
+            return "Object Fields"
+        elif self == ContentType.GENERIC_DEFINITION:
+            return "Objects"
+        elif self == ContentType.GENERIC_MODULE:
+            return "Modules"
+        separated_str = pascalToSpace(self)
+        return f"{separated_str}s"
+
+    @staticmethod
+    def convert_header_to_content_type(header: str) -> "ContentType":
+        """
+        Convert Release note header to ContentType.
+        """
+        if header == "Triggers Recommendations":
+            return ContentType.TRIGGER
+        elif header == "Preprocess Rules":
+            return ContentType.PREPROCESS_RULE
+        elif header == "Mappers":
+            return ContentType.MAPPER
+        elif header == "Objects":
+            return ContentType.GENERIC_DEFINITION
+        elif header == "Modules":
+            return ContentType.GENERIC_MODULE
+        elif header == "Object Types":
+            return ContentType.GENERIC_TYPE
+        elif header == "Object Fields":
+            return ContentType.GENERIC_FIELD
+        normalized_header = header.rstrip("s").replace(" ", "_").upper()
+        return ContentType[normalized_header]
+
+
+class Relationship(BaseModel):
+    relationship: Optional[RelationshipType] = None
+    source: Optional[str] = None
+    source_id: Optional[str] = None
+    source_type: Optional[ContentType] = None
+    source_fromversion: Optional[str] = None
+    source_marketplaces: Optional[List[MarketplaceVersions]]
+    target: Optional[str] = None
+    target_type: Optional[ContentType] = None
+    mandatorily: Optional[bool] = None
+    description: Optional[str] = None
+    deprecated: Optional[bool] = None
+    name: Optional[str] = None
+
 
 class Relationships(dict):
     def add(self, relationship: RelationshipType, **kwargs):
         if relationship not in self.keys():
             self.__setitem__(relationship, [])
-        self.__getitem__(relationship).append(kwargs)
+        self.__getitem__(relationship).append(
+            Relationship.parse_obj(kwargs).dict(exclude_none=True)
+        )
 
     def add_batch(self, relationship: RelationshipType, data: List[Dict[str, Any]]):
         if relationship not in self.keys():
             self.__setitem__(relationship, [])
+        data = [Relationship.parse_obj(item).dict(exclude_none=True) for item in data]
         self.__getitem__(relationship).extend(data)
 
     def update(self, other: "Relationships") -> None:  # type: ignore
@@ -337,21 +440,25 @@ def lazy_property(property_func: Callable):
     return LazyProperty(_lazy_decorator)
 
 
-def get_server_content_items() -> Dict[ContentType, list]:
+def get_server_content_items(tag: Optional[str] = None) -> Dict[ContentType, list]:
     """Reads a JSON file containing server content items from content repository
     and returns a dict representation of it in the required format.
-
+    Args:
+        tag (Optional[str], optional): A tag to get the server content items from.
+            If not specified, the server content items will be read from the local file.
     Returns:
         Dict[ContentType, list]: A mapping of content types to the list of server content items.
     """
-    try:
-        json_data: dict = get_json(SERVER_CONTENT_ITEMS_PATH)
-    except FileNotFoundError:
+    from_remote = tag is not None or not SERVER_CONTENT_ITEMS_PATH.exists()
+    if not from_remote:
+        json_data: dict = get_json(str(SERVER_CONTENT_ITEMS_PATH))
+    else:
         json_data = get_remote_file(
-            SERVER_CONTENT_ITEMS_PATH,
+            str(SERVER_CONTENT_ITEMS_PATH),
             git_content_config=GitContentConfig(
                 repo_name=GitContentConfig.OFFICIAL_CONTENT_REPO_NAME,
             ),
+            tag=tag,
         )
     return {ContentType(k): v for k, v in json_data.items()}
 
@@ -412,3 +519,56 @@ CONTENT_PRIVATE_ITEMS: dict = {
         "MITRE Layout",
     ],
 }
+
+
+def replace_marketplace_references(
+    data: Any, marketplace: MarketplaceVersions, path: str = ""
+) -> Any:
+    """
+    Recursively replaces "Cortex XSOAR" with "Cortex" in the given data if the marketplace is MarketplaceV2 or XPANSE.
+    If the word following "Cortex XSOAR" contains a number, it will also be removed.
+
+    Args:
+        data (Any): The data to process, which can be a dictionary, list, or string.
+        marketplace (MarketplaceVersions): The marketplace version to check against.
+        path (str): The path of the item being processed.
+
+    Returns:
+        Any: The same data object with replacements made if applicable.
+    """
+    try:
+        if marketplace in {
+            MarketplaceVersions.MarketplaceV2,
+            MarketplaceVersions.XPANSE,
+        }:
+            if isinstance(data, dict):
+                keys_to_update = {}
+                for key, value in data.items():
+                    # Process the key
+                    new_key = (
+                        re.sub(r"Cortex XSOAR(?: \w*\d\w*)?", "Cortex", key)
+                        if isinstance(key, str)
+                        else key
+                    )
+                    if new_key != key:
+                        keys_to_update[key] = new_key
+                    # Process the value
+                    data[key] = replace_marketplace_references(value, marketplace, path)
+                # Update the keys in the dictionary
+                for old_key, new_key in keys_to_update.items():
+                    data[new_key] = data.pop(old_key)
+            elif isinstance(data, list):
+                for i in range(len(data)):
+                    data[i] = replace_marketplace_references(data[i], marketplace, path)
+            elif isinstance(data, FoldedScalarString):
+                # if data is a FoldedScalarString (yml unification), we need to convert it to a string and back
+                data = FoldedScalarString(
+                    re.sub(r"Cortex XSOAR(?: \w*\d\w*)?", "Cortex", str(data))
+                )
+            elif isinstance(data, str):
+                data = re.sub(r"Cortex XSOAR(?: \w*\d\w*)?", "Cortex", data)
+    except Exception as e:
+        logger.error(
+            f"Error processing data for replacing incorrect marketplace at path '{path}': {e}"
+        )
+    return data

@@ -1,3 +1,4 @@
+from pathlib import Path
 from typing import Set
 
 from demisto_sdk.commands.common.constants import MarketplaceVersions
@@ -31,8 +32,18 @@ class XDRCTemplate(ContentItemXSIAM, content_type=ContentType.XDRC_TEMPLATE):
     def prepare_for_upload(
         self,
         current_marketplace: MarketplaceVersions = MarketplaceVersions.MarketplaceV2,
-        **kwargs
+        **kwargs,
     ) -> dict:
         data = super().prepare_for_upload(current_marketplace)
         data = XDRCTemplateUnifier.unify(self.path, data, current_marketplace)
         return data
+
+    @staticmethod
+    def match(_dict: dict, path: Path) -> bool:
+        if (
+            "profile_type" in _dict
+            and "yaml_template" in _dict
+            and path.suffix == ".json"
+        ):
+            return True
+        return False

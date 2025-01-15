@@ -48,7 +48,7 @@ class IncidentFieldJSONFormat(BaseUpdateJSON):
     def run_format(self) -> int:
         try:
             logger.info(
-                f"\n[blue]================= Updating file {self.source_file} =================[/blue]"
+                f"\n<blue>================= Updating file {self.source_file} =================</blue>"
             )
             super().update_json()
             self.format_marketplaces_field_of_aliases()
@@ -57,7 +57,7 @@ class IncidentFieldJSONFormat(BaseUpdateJSON):
             return SUCCESS_RETURN_CODE
         except Exception as err:
             logger.debug(
-                f"\n[red]Failed to update file {self.source_file}. Error: {err}[/red]"
+                f"\n<red>Failed to update file {self.source_file}. Error: {err}</red>"
             )
             return ERROR_RETURN_CODE
 
@@ -69,7 +69,6 @@ class IncidentFieldJSONFormat(BaseUpdateJSON):
 
         aliases = self.data.get("Aliases", {})
         if aliases:
-
             if not self.graph:
                 logger.info(
                     f"Skipping formatting of marketplaces field of aliases for {self.source_file} as the "
@@ -88,9 +87,8 @@ class IncidentFieldJSONFormat(BaseUpdateJSON):
                     len(alias_marketplaces) != 1
                     or alias_marketplaces[0] != MarketplaceVersions.XSOAR.value
                 ):
-
                     logger.info(
-                        f"\n[blue]================= Updating file {alias_file_path} =================[/blue]"
+                        f"\n<blue>================= Updating file {alias_file_path} =================</blue>"
                     )
                     alias_file_content = get_file(alias_file_path, raise_on_error=True)
                     alias_file_content["marketplaces"] = [

@@ -1,4 +1,3 @@
-import logging
 import os
 from copy import deepcopy
 from pathlib import Path
@@ -27,7 +26,7 @@ from demisto_sdk.commands.common.hook_validations.integration import (
 from demisto_sdk.commands.common.hook_validations.structure import StructureValidator
 from demisto_sdk.commands.common.legacy_git_tools import git_path
 from TestSuite.integration import Integration
-from TestSuite.test_tools import ChangeCWD, str_in_call_args_list
+from TestSuite.test_tools import ChangeCWD
 
 default_additional_info = load_default_additional_info_dict()
 
@@ -320,18 +319,16 @@ class TestIntegrationValidator:
         "current, old, answer, changed_command_names", IS_CHANGED_CONTEXT_INPUTS
     )
     def test_no_change_to_context_path(
-        self, current, old, answer, changed_command_names, mocker
+        self, current, old, answer, changed_command_names, mocker, caplog
     ):
-        logger_error = mocker.patch.object(logging.getLogger("demisto-sdk"), "error")
+        caplog.set_level("ERROR")
         current = {"script": {"commands": current}}
         old = {"script": {"commands": old}}
         structure = mock_structure("", current, old)
         validator = IntegrationValidator(structure)
         assert validator.no_change_to_context_path() is answer
         for changed_command_name in changed_command_names:
-            assert str_in_call_args_list(
-                logger_error.call_args_list, changed_command_name
-            )
+            assert changed_command_name in caplog.text
         structure.quiet_bc = True
         assert (
             validator.no_change_to_context_path() is True
@@ -406,7 +403,7 @@ class TestIntegrationValidator:
         "current, old, expected_error_msg", CHANGED_COMMAND_OR_ARG_MST_TEST_INPUTS
     )
     def test_no_changed_command_name_or_arg_msg(
-        self, current, old, expected_error_msg, mocker
+        self, current, old, expected_error_msg, mocker, caplog
     ):
         """
         Given
@@ -424,13 +421,13 @@ class TestIntegrationValidator:
         Ensure that the error massage was created correctly.
         - Case 1: Should include both command_test_name_1 and command_test_name_2 in the commands list in the error as they both have BC break changes.
         """
-        logger_error = mocker.patch.object(logging.getLogger("demisto-sdk"), "error")
+        caplog.set_level("ERROR")
         current = {"script": {"commands": current}}
         old = {"script": {"commands": old}}
         structure = mock_structure("", current, old)
         validator = IntegrationValidator(structure)
         validator.no_changed_command_name_or_arg()
-        assert str_in_call_args_list(logger_error.call_args_list, expected_error_msg)
+        assert expected_error_msg in caplog.text
 
     WITHOUT_DUP = [{"name": "test"}, {"name": "test1"}]
     DUPLICATE_PARAMS_INPUTS = [(WITHOUT_DUP, True)]
@@ -505,11 +502,9 @@ class TestIntegrationValidator:
 
     @pytest.mark.parametrize("args, answer, expecting_warning", DEFAULT_INFO_INPUTS)
     def test_default_params_default_info(
-        self, mocker, args: List[Dict], answer: str, expecting_warning: bool
+        self, mocker, args: List[Dict], answer: str, expecting_warning: bool, caplog
     ):
-        logger_warning = mocker.patch.object(
-            logging.getLogger("demisto-sdk"), "warning"
-        )
+        caplog.set_level("WARNING")
         validator = IntegrationValidator(mock_structure("", {"configuration": args}))
         assert validator.default_params_have_default_additional_info() is answer
 
@@ -520,9 +515,7 @@ class TestIntegrationValidator:
                 ["API key"]
             )
             expected_message = f"[{warning_code}] - {warning_message}"
-            assert str_in_call_args_list(
-                logger_warning.call_args_list, expected_message
-            )
+            assert expected_message in caplog.text
 
     NO_INCIDENT_INPUT = [
         (
@@ -1276,31 +1269,6 @@ class TestIntegrationValidator:
         validator.current_file = current
         assert validator.is_valid_display_name() is answer
 
-    V2_VALID_SIEM_1 = {"display": "PhishTank v2", "script": {"isfetchevents": False}}
-    V2_VALID_SIEM_2 = {
-        "display": "PhishTank v2 Event Collector",
-        "script": {"isfetchevents": True},
-    }
-    V2_VALID_SIEM_3 = {"display": "PhishTank v2 Event Collector", "script": {}}
-    V2_VALID_SIEM_4 = {"display": "PhishTank v2 Event Collector"}
-    V2_INVALID_SIEM = {"display": "PhishTank v2", "script": {"isfetchevents": True}}
-
-    V2_SIEM_NAME_INPUTS = [
-        (V2_VALID_SIEM_1, True),
-        (V2_VALID_SIEM_2, True),
-        (V2_VALID_SIEM_3, True),
-        (V2_VALID_SIEM_4, True),
-        (V2_INVALID_SIEM, False),
-    ]
-
-    @pytest.mark.parametrize("current, answer", V2_SIEM_NAME_INPUTS)
-    def test_is_valid_display_name_siem(self, current, answer):
-        structure = mock_structure("", current)
-        validator = IntegrationValidator(structure)
-        validator.current_file = current
-
-        assert validator.is_valid_display_name_for_siem() is answer
-
     V2_VALID_SIEM_1 = {
         "display": "Test Event Collector",
         "script": {"isfetchevents": True},
@@ -1322,26 +1290,6 @@ class TestIntegrationValidator:
         (V2_INVALID_SIEM, False),
         (V2_INVALID_SIEM_2, False),
     ]
-
-    @pytest.mark.parametrize("current, answer", V2_SIEM_MARKETPLACE_INPUTS)
-    def test_is_valid_xsiam_marketplace(self, current, answer):
-        """
-        Given
-            - Valid marketplaces field (only with marketplacev2)
-            - Invalid marketplaces field (with 2 entries - suppose to be only 1)
-            - Invalid marketplaces field (with xsaor value instead of marketplacev2)
-
-        When
-            - running is_valid_xsiam_marketplace.
-
-        Then
-            - Check that the function returns True if valid, else False.
-        """
-        structure = mock_structure("", current)
-        validator = IntegrationValidator(structure)
-        validator.current_file = current
-
-        assert validator.is_valid_xsiam_marketplace() is answer
 
     VALID_DEFAULTVALUE_CHECKBOX_1 = {
         "configuration": [{"defaultvalue": "true", "type": 8}]
@@ -1912,16 +1860,6 @@ class TestIntegrationValidator:
             (["true"], False),
             (["True"], False),
             (MarketplaceVersions.XSOAR, False),
-            (
-                [
-                    MarketplaceVersions.XSOAR,
-                    MarketplaceVersions.MarketplaceV2,
-                    MarketplaceVersions.XPANSE,
-                    MarketplaceVersions.XSOAR_SAAS,
-                    MarketplaceVersions.XSOAR_ON_PREM,
-                ],
-                False,
-            ),
             ("🥲", False),
             ("Trüe", False),
             ([MarketplaceVersions.XSOAR, None], False),
@@ -2030,8 +1968,6 @@ class TestIsFetchParamsExist:
         ), "is_valid_fetch() returns True instead False"
 
     def test_missing_max_fetch_text(self, mocker, caplog, capsys):
-        logger_info = mocker.patch.object(logging.getLogger("demisto-sdk"), "info")
-        logger_error = mocker.patch.object(logging.getLogger("demisto-sdk"), "error")
         # missing param in configuration
         self.validator.current_file["configuration"] = [
             t
@@ -2039,12 +1975,10 @@ class TestIsFetchParamsExist:
             if t["name"] != "incidentType"
         ]
         assert self.validator.is_valid_fetch() is False
-        assert not str_in_call_args_list(
-            logger_info.call_args_list, "display: Incident type"
-        )
-        assert str_in_call_args_list(
-            logger_error.call_args_list,
-            """A required parameter "incidentType" is missing from the YAML file.""",
+        assert "display: Incident type" not in caplog.text
+        assert (
+            'A required parameter "incidentType" is missing from the YAML file.'
+            in caplog.text
         )
 
     def test_missing_field(self):
@@ -2057,9 +1991,9 @@ class TestIsFetchParamsExist:
             self.validator.is_valid_fetch() is False
         ), "is_valid_fetch() returns True instead False"
 
-    def test_malformed_field(self, mocker):
+    def test_malformed_field(self, mocker, caplog):
         # incorrect param
-        logger_error = mocker.patch.object(logging.getLogger("demisto-sdk"), "error")
+        caplog.set_level("ERROR")
         config = self.validator.current_file["configuration"]
         self.validator.current_file["configuration"] = []
         for t in config:
@@ -2070,19 +2004,25 @@ class TestIsFetchParamsExist:
         assert (
             self.validator.is_valid_fetch() is False
         ), "is_valid_fetch() returns True instead False"
-        assert all(
-            [
-                str_in_call_args_list(
-                    logger_error.call_args_list, "display: Incident type"
-                ),
-                str_in_call_args_list(
-                    logger_error.call_args_list, "name: incidentType"
-                ),
-            ]
-        )
+        assert "display: Incident type" in caplog.text
+        assert "name: incidentType" in caplog.text
 
-    def test_not_fetch(self, mocker):
-        self.test_malformed_field(mocker)
+    def test_specific_for_marketplace(self):
+        """
+        Given:
+            a schema whit a custom value for specific marketplace on fetch
+
+        When:
+            running is_valid_fetch
+
+        Then:
+            validate that the validation pass
+        """
+        self.validator.current_file["configuration"][-1]["defaultValue:xsoar"] = "test"
+        assert self.validator.is_valid_fetch()
+
+    def test_not_fetch(self, mocker, caplog):
+        self.test_malformed_field(mocker, caplog)
         self.validator.is_valid = True
         self.validator.current_file["script"]["isfetch"] = False
         assert (
@@ -2291,6 +2231,16 @@ class TestIsFeedParamsExist:
             self.validator.all_feed_params_exist() is True
         ), "all_feed_params_exist() returns False instead True"
 
+    def test_value_for_marketplace_feed(self):
+        configuration = self.validator.current_file["configuration"]
+        for item in configuration:
+            if item.get("name") == "feed":
+                item["name:xsoar"] = "test-name"
+                item["something:xsoar"] = "test"
+        assert (
+            self.validator.all_feed_params_exist() is True
+        ), "all_feed_params_exist() returns False instead True"
+
     NO_HIDDEN = {
         "configuration": [
             {"id": "new", "name": "new", "display": "test"},
@@ -2364,16 +2314,16 @@ class TestIsFeedParamsExist:
     IS_VALID_HIDDEN_PARAMS = [
         (NO_HIDDEN, True),
         (HIDDEN_FALSE, True),
-        (HIDDEN_TRUE, False),
-        (HIDDEN_TRUE_AND_FALSE, False),
+        (HIDDEN_TRUE, True),
+        (HIDDEN_TRUE_AND_FALSE, True),
         (HIDDEN_ALLOWED_TRUE, True),
         (HIDDEN_ALLOWED_FEED_REPUTATION, True),
         (HIDDEN_TRUE_BUT_REPLACED_TYPE_0, True),
         (HIDDEN_TRUE_BUT_REPLACED_TYPE_12, True),
         (HIDDEN_TRUE_BUT_REPLACED_TYPE_14, True),
-        (HIDDEN_TRUE_BUT_REPLACED_BY_NOT_ALLOWED, False),
+        (HIDDEN_TRUE_BUT_REPLACED_BY_NOT_ALLOWED, True),
         (HIDDEN_TRUE_BUT_REPLACED_4, True),
-        (HIDDEN_ONE_REPLACED_TO_9_OTHER_NOT, False),
+        (HIDDEN_ONE_REPLACED_TO_9_OTHER_NOT, True),
     ]
 
     @pytest.mark.parametrize("current, answer", IS_VALID_HIDDEN_PARAMS)

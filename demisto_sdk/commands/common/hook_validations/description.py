@@ -56,7 +56,6 @@ class DescriptionValidator(BaseValidator):
 
     def is_valid_file(self):
         self.is_duplicate_description()
-        self.verify_demisto_in_description_content()
 
         # Validations that will run only on Markdown file
         if (
@@ -232,88 +231,6 @@ class DescriptionValidator(BaseValidator):
 
         return True
 
-    @error_codes("DS104,DS107")
-    def verify_demisto_in_description_content(self):
-        """
-        Checks if there are the word 'Demisto' in the description content.
-
-        Return:
-            True if 'Demisto' does not exist in the description content, and False if it does.
-        """
-        description_path = ""
-        yml_line_num = 0
-        yml_or_file = ""
-
-        # case 1 the file path is for an integration
-        if find_type(self.file_path) in [
-            FileType.INTEGRATION,
-            FileType.BETA_INTEGRATION,
-        ]:
-            integration_path = self.file_path
-            is_unified_integration = self.data_dictionary.get("script", {}).get(
-                "script", ""
-            ) not in {"-", ""}
-
-            if is_unified_integration:
-                description_content = self.data_dictionary.get(
-                    "detaileddescription", ""
-                )
-                yml_or_file = "in the yml file"
-
-                # find in which line the description begins in the yml
-                with open(self.file_path) as f:
-                    for line_n, line in enumerate(f.readlines()):
-                        if "detaileddescription:" in line:
-                            yml_line_num = line_n + 1
-
-            # if not found try and look for the description file path
-            else:
-                yml_or_file = "in the description file"
-                description_path = (
-                    f"{os.path.splitext(self.file_path)[0]}_description.md"
-                )
-
-                if not Path(description_path).exists():
-                    error_message, error_code = Errors.no_description_file_warning()
-                    self.handle_error(
-                        error_message,
-                        error_code,
-                        file_path=self.file_path,
-                        warning=True,
-                    )
-                    return True
-
-        # running on a description file so the file path is the description path
-        else:
-            description_path = self.file_path
-            integration_path = self.file_path.replace("_description.md", ".yml")
-            yml_or_file = "in the description file"
-
-        if description_path:
-            with open(description_path) as f:
-                description_content = f.read()
-
-        invalid_lines = []
-        for line_num, line in enumerate(description_content.split("\n")):
-            if "demisto " in line.lower() or " demisto" in line.lower():
-                invalid_lines.append(line_num + yml_line_num + 1)
-
-        if invalid_lines:
-            error_message, error_code = Errors.description_contains_demisto_word(
-                invalid_lines, yml_or_file
-            )
-
-            if self.handle_error(
-                error_message,
-                error_code,
-                file_path=integration_path,
-            ):
-                self._is_valid = False
-                return False
-
-        return True
-
-    # @error_codes("DS108")
     def has_markdown_lint_errors(self, file_content: str):
         if mdx_server_is_up():
             markdown_response = run_markdownlint(file_content)

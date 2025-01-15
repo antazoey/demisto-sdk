@@ -2,7 +2,7 @@ import csv
 import traceback
 from io import StringIO
 from pathlib import Path
-from typing import List, Tuple
+from typing import List, Optional, Tuple
 
 import typer
 
@@ -17,6 +17,7 @@ from demisto_sdk.commands.common.logger import (
     handle_deprecated_args,
     logger,
     logging_setup,
+    logging_setup_decorator,
 )
 from demisto_sdk.commands.common.tools import get_max_version
 
@@ -28,9 +29,14 @@ SCHEMA_TYPE_NUMBER = "Number"
 SCHEMA_TYPE_BOOLEAN = "Boolean"
 
 
+@logging_setup_decorator
 @app.command(
     no_args_is_help=True,
-    context_settings={"allow_extra_args": True, "ignore_unknown_options": True},
+    context_settings={
+        "allow_extra_args": True,
+        "ignore_unknown_options": True,
+        "help_option_names": ["-h", "--help"],
+    },
 )
 def generate_modeling_rules(
     ctx: typer.Context,
@@ -92,28 +98,28 @@ def generate_modeling_rules(
         "INFO",
         "-clt",
         "--console-log-threshold",
-        help=("Minimum logging threshold for the console logger."),
+        help="Minimum logging threshold for the console logger.",
     ),
     file_log_threshold: str = typer.Option(
         "DEBUG",
         "-flt",
         "--file-log-threshold",
-        help=("Minimum logging threshold for the file logger."),
+        help="Minimum logging threshold for the file logger.",
     ),
-    log_file_path: str = typer.Option(
-        "demisto_sdk_debug.log",
+    log_file_path: Optional[str] = typer.Option(
+        None,
         "-lp",
         "--log-file-path",
-        help=("Path to the log file. Default: ./demisto_sdk_debug.log."),
+        help="Path to save log files onto.",
     ),
 ):
     logging_setup(
-        console_log_threshold=console_log_threshold,
-        file_log_threshold=file_log_threshold,
-        log_file_path=log_file_path,
+        console_threshold=console_log_threshold,
+        file_threshold=file_log_threshold,
+        path=log_file_path,
+        calling_function=__name__,
     )
     handle_deprecated_args(ctx.args)
-    errors = False
     try:
         path_prefix = snake_to_camel_case(vendor)
         outputfile_schema = Path(output_path, (f"{path_prefix}ModelingRules.json"))
@@ -145,9 +151,9 @@ def generate_modeling_rules(
     except Exception:
         with StringIO() as sio:
             traceback.print_exc(file=sio)
-            logger.error(f"[red]{sio.getvalue()}[/red]", extra={"markup": True})
-        errors = True
-    if errors:
+            logger.error(
+                f"<red>{sio.getvalue()}</red>",
+            )
         raise typer.Exit(1)
 
 
@@ -286,7 +292,7 @@ def init_mapping_field_list(
     """
     mapping_list = []
     xdm_onedata_model_names = xdm_rule_to_dclass.keys()
-    for (field_name, xdm_field_name) in zip(name_columen, xdm_one_data_model):
+    for field_name, xdm_field_name in zip(name_columen, xdm_one_data_model):
         raw_event_data_list: List[RawEventData] = handle_raw_evnet_data(
             field_name, raw_event
         )

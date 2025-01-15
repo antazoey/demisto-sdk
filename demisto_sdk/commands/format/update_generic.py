@@ -74,14 +74,18 @@ class BaseUpdate:
         _, self.relative_content_path = is_file_from_content_repo(self.output_file)
         self.prev_ver = prev_ver
         self.old_file = self.is_old_file(
-            self.relative_content_path
-            if self.relative_content_path
-            else self.output_file,
+            (
+                self.relative_content_path
+                if self.relative_content_path
+                else self.output_file
+            ),
             self.prev_ver,
         )
         self.schema_path = path
         self.schema = self.get_schema()
-        self.extended_schema: dict = self.recursive_extend_schema(self.schema, self.schema)  # type: ignore
+        self.extended_schema: dict = self.recursive_extend_schema(
+            self.schema, self.schema
+        )  # type: ignore
         self.from_version = from_version
         self.no_validate = no_validate
         self.assume_answer = assume_answer
@@ -205,7 +209,7 @@ class BaseUpdate:
                     extended_schema: dict = full_schema.get(f"schema;{value}")  # type: ignore
                     if extended_schema is None:
                         logger.info(
-                            f"[yellow]Could not find sub-schema for {value}[/yellow]"
+                            f"<yellow>Could not find sub-schema for {value}</yellow>"
                         )
                     # sometimes the sub-schema can have it's own sub-schemas so we need to unify that too
                     return BaseUpdate.recursive_extend_schema(
@@ -282,7 +286,7 @@ class BaseUpdate:
 
     @staticmethod
     def get_answer(promote):
-        logger.info(f"[red]{promote}[/red]")
+        logger.info(f"<red>{promote}</red>")
         return input()
 
     def ask_user(self, preserve_from_version_question=False):
@@ -298,13 +302,13 @@ class BaseUpdate:
         else:
             user_answer = self.get_answer(
                 "Either no fromversion is specified in your file, "
-                "or it is lower than the minimal fromversion for this content type."
+                "or it is lower than the minimal fromversion for this content type. "
                 "Would you like to set it to the default? [Y/n]"
             )
         if not user_answer or user_answer.lower() in ["y", "yes"]:
             return True
         else:
-            logger.info("[yellow]Skipping update of fromVersion[/yellow]")
+            logger.info("<yellow>Skipping update of fromVersion</yellow>")
             return False
 
     def set_default_from_version(
@@ -395,7 +399,7 @@ class BaseUpdate:
         """Removes any _dev and _copy suffixes in the file.
         When developer clones playbook/integration/script it will automatically add _copy or _dev suffix.
         """
-        logger.info("Removing _dev and _copy suffixes from name, id and display tags")
+        logger.debug("Removing _dev and _copy suffixes from name, id and display tags")
         if self.data["name"]:
             self.data["name"] = (
                 self.data.get("name", "").replace("_copy", "").replace("_dev", "")
@@ -418,7 +422,7 @@ class BaseUpdate:
         """
         if self.no_validate:
             logger.debug(
-                f"[yellow]Validator Skipped on file: {self.output_file} , no-validate flag was set.[/yellow]"
+                f"<yellow>Validator Skipped on file: {self.output_file} , no-validate flag was set.</yellow>"
             )
             return SKIP_RETURN_CODE
         else:

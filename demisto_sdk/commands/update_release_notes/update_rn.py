@@ -1,6 +1,7 @@
 """
 This script is used to create a release notes template
 """
+
 import copy
 import errno
 import os
@@ -16,12 +17,12 @@ from demisto_sdk.commands.common.constants import (
     DEPRECATED_NO_REPLACE_DESC_REGEX,
     EVENT_COLLECTOR,
     IGNORED_PACK_NAMES,
-    RN_CONTENT_ENTITY_WITH_STARS,
     RN_HEADER_BY_FILE_TYPE,
     SIEM_ONLY_ENTITIES,
     XSIAM_DASHBOARDS_DIR,
     XSIAM_REPORTS_DIR,
     FileType,
+    MarketplaceVersions,
 )
 from demisto_sdk.commands.common.content import Content
 from demisto_sdk.commands.common.content.objects.pack_objects import (
@@ -194,8 +195,8 @@ class UpdateRN:
         def validate_new_path(expected_path: str):
             if not Path(expected_path).exists():
                 logger.info(
-                    f"[yellow]file {file_path} implies the existence of {str(expected_path)}, which is missing. "
-                    f"Did you mistype {file_path}?[/yellow]"
+                    f"<yellow>file {file_path} implies the existence of {str(expected_path)}, which is missing. "
+                    f"Did you mistype {file_path}?</yellow>"
                 )
 
         if file_path.endswith("_image.png"):
@@ -232,7 +233,7 @@ class UpdateRN:
                 return existing_rn_abs_path.read_text()
             except Exception as e:
                 logger.info(
-                    f"[red]Failed to load the previous release notes file content: {e}[/red]"
+                    f"<red>Failed to load the previous release notes file content: {e}</red>"
                 )
         return ""
 
@@ -245,8 +246,8 @@ class UpdateRN:
         """
         if self.pack in IGNORED_PACK_NAMES:
             logger.info(
-                f"[yellow]Release notes are not required for the {self.pack} pack since this pack"
-                f" is not versioned.[/yellow]"
+                f"<yellow>Release notes are not required for the {self.pack} pack since this pack"
+                f" is not versioned.</yellow>"
             )
             return False
 
@@ -269,6 +270,9 @@ class UpdateRN:
                 )
             else:
                 docker_image_name = None
+            if file_type == FileType.METADATA:
+                self.pack_metadata_only = True
+                continue
             changed_files[(file_name, file_type)] = {
                 "description": get_file_description(packfile, file_type),
                 "is_new_file": packfile in self.added_files,
@@ -276,6 +280,7 @@ class UpdateRN:
                 "dockerimage": docker_image_name,
                 "path": packfile,
             }
+        self.pack_metadata_only = (not changed_files) and self.pack_metadata_only
         return self.create_pack_rn(rn_path, changed_files, new_metadata, new_version)
 
     def create_pack_rn(
@@ -304,27 +309,27 @@ class UpdateRN:
             self.build_rn_config_file(new_version)
             if self.existing_rn_changed:
                 logger.info(
-                    f"[green]Finished updating release notes for {self.pack}.[/green]"
+                    f"<green>Finished updating release notes for {self.pack}.</green>"
                 )
                 if not self.text:
                     logger.info(
-                        f"\n[green]Next Steps:\n - Please review the "
+                        f"\n<green>Next Steps:\n - Please review the "
                         f"created release notes found at {rn_path} and document any changes you "
                         f"made by replacing '%%UPDATE_RN%%'.\n - Commit "
                         f"the new release notes to your branch.\nFor information regarding proper"
                         f" format of the release notes, please refer to "
-                        f"https://xsoar.pan.dev/docs/integrations/changelog[/green]"
+                        f"https://xsoar.pan.dev/docs/integrations/changelog</green>"
                     )
                 return True
             else:
                 logger.info(
-                    f"[green]No changes to {self.pack} pack files were detected from the previous time "
+                    f"<green>No changes to {self.pack} pack files were detected from the previous time "
                     "this command was run. The release notes have not been "
-                    "changed.[/green]"
+                    "changed.</green>"
                 )
         else:
             logger.info(
-                "[yellow]No changes which would belong in release notes were detected.[/yellow]"
+                "<yellow>No changes which would belong in release notes were detected.</yellow>"
             )
         return False
 
@@ -354,9 +359,10 @@ class UpdateRN:
         with open(bc_file_path, "w") as f:
             f.write(json.dumps(bc_file_data, indent=4))
         logger.info(
-            f"[green]Finished creating config file for RN version {new_version}.\n"
+            f"<green>Finished creating config file for RN version {new_version}.\n"
+            "If the breaking changes apply only for specific marketplaces, add those values under the `marketplaces` field.\n"
             "If you wish only specific text to be shown as breaking changes, please fill the "
-            "`breakingChangesNotes` field with the appropriate breaking changes text.[/green]"
+            "`breakingChangesNotes` field with the appropriate breaking changes text.</green>"
         )
 
     def get_new_version_and_metadata(self) -> Tuple[str, dict]:
@@ -401,7 +407,7 @@ class UpdateRN:
         """
         if not Path(self.metadata_path).is_file():
             logger.info(
-                f'[red]"{self.metadata_path}" file does not exist, create one in the root of the pack[/red]'
+                f'<red>"{self.metadata_path}" file does not exist, create one in the root of the pack</red>'
             )
             return False
 
@@ -422,8 +428,8 @@ class UpdateRN:
             master_metadata = get_remote_file(self.metadata_path, tag=self.main_branch)
         except Exception:
             logger.exception(
-                f"[red]Failed fetching {self.metadata_path} from remote master branch."
-                "Using the local version (if exists), instead[/red]",
+                f"<red>Failed fetching {self.metadata_path} from remote master branch."
+                "Using the local version (if exists), instead</red>",
             )
         if master_metadata:
             master_current_version = master_metadata.get("currentVersion", "0.0.0")
@@ -638,12 +644,12 @@ class UpdateRN:
             with open(self.metadata_path, "w") as file_path:
                 json.dump(metadata_dict, file_path, indent=4)
                 logger.info(
-                    f"[green]Updated pack metadata version at path : {self.metadata_path}[/green]"
+                    f"<green>Updated pack metadata version at path : {self.metadata_path}</green>"
                 )
             try:
                 run_command(f"git add {self.metadata_path}", exit_on_error=False)
             except RuntimeError:
-                logger.error(f"[red]Failed git-adding {self.metadata_path}[/red]")
+                logger.error(f"<red>Failed git-adding {self.metadata_path}</red>")
 
     @staticmethod
     def check_rn_dir(rn_path: str):
@@ -672,7 +678,8 @@ class UpdateRN:
         rn_string = ""
 
         if self.pack_metadata_only:
-            rn_string += f"\n#### Integrations\n\n##### {self.pack}\n\n- Documentation and metadata improvements.\n"
+            pack_display_name = self.get_pack_metadata().get("name", self.pack)
+            rn_string += f"## {pack_display_name}\n\n- %%UPDATE_RN%%\n"
             return rn_string
         rn_template_as_dict: dict = {}
         if self.is_force:
@@ -739,26 +746,33 @@ class UpdateRN:
         :return
         The release notes description
         """
-        if _type in RN_CONTENT_ENTITY_WITH_STARS:
-            if is_new_file:
-                rn_desc = f"- New: **{content_name}**\n"
-            else:
-                rn_desc = f"- **{content_name}**\n"
-
-        elif self.is_force:
+        text = text.encode("utf-8").decode("unicode_escape")
+        if self.is_force:
             rn_desc = f"## {content_name}\n\n"
             rn_desc += f'- {text or "%%UPDATE_RN%%"}\n'
         else:
             if is_new_file:
                 rn_desc = f"##### New: {content_name}\n\n"
                 if desc:
-                    rn_desc += f"- New: {desc}"
+                    if _type == FileType.PLAYBOOK:
+                        rn_desc += format_playbook_description(desc)
+                    else:
+                        rn_desc += f"- New: {desc}"
                 if _type in SIEM_ONLY_ENTITIES or content_name.replace(
                     " ", ""
                 ).lower().endswith(EVENT_COLLECTOR.lower()):
-                    rn_desc += "(Available from Cortex XSIAM %%XSIAM_VERSION%%)."
+                    rn_desc += "<~XSIAM> (Available from Cortex XSIAM %%XSIAM_VERSION%%).</~XSIAM>"
                 elif from_version and _type not in SIEM_ONLY_ENTITIES:
-                    rn_desc += f" (Available from Cortex XSOAR {from_version})."
+                    pack_marketplaces = self.get_pack_metadata().get(
+                        "marketplaces", [MarketplaceVersions.XSOAR.value]
+                    )
+                    if MarketplaceVersions.MarketplaceV2.value in pack_marketplaces:
+                        rn_desc += "<~XSIAM> (Available from Cortex XSIAM %%XSIAM_VERSION%%).</~XSIAM>\n"
+                    if (
+                        not pack_marketplaces
+                        or MarketplaceVersions.XSOAR.value in pack_marketplaces
+                    ):
+                        rn_desc += f"<~XSOAR> (Available from Cortex XSOAR {from_version}).</~XSOAR>"
                 rn_desc += "\n"
             else:
                 rn_desc = f"##### {content_name}\n\n"
@@ -778,7 +792,6 @@ class UpdateRN:
                         rn_desc += deprecate_rn
                     else:
                         rn_desc += f'- {text or "%%UPDATE_RN%%"}\n'
-
         if docker_image:
             rn_desc += f"- Updated the Docker image to: *{docker_image}*.\n"
         return rn_desc
@@ -796,7 +809,7 @@ class UpdateRN:
             True if the content item header exists in the release notes, False otherwise.
         """
         for line in current_rn.replace("#####", "").replace("**", "").split("\n"):
-            if content_name == line.replace("-", "", 1).strip():
+            if content_name == re.sub(r"^-|New:", "", line.strip()).strip():
                 return True
         return False
 
@@ -899,7 +912,7 @@ class UpdateRN:
             )
         else:
             logger.info(
-                f"[yellow]Could not parse release notes {new_rn} by header type: {header_by_type}[/yellow]"
+                f"<yellow>Could not parse release notes {new_rn} by header type: {header_by_type}</yellow>"
             )
         return new_rn
 
@@ -917,7 +930,7 @@ class UpdateRN:
         """
         if Path(release_notes_path).exists() and self.update_type is not None:
             logger.info(
-                f"[yellow]Release notes were found at {release_notes_path}. Skipping[/yellow]"
+                f"<yellow>Release notes were found at {release_notes_path}. Skipping</yellow>"
             )
         elif self.update_type is None and self.specific_version is None:
             current_rn = get_latest_release_notes_text(release_notes_path)
@@ -980,7 +993,7 @@ def get_file_description(path, file_type) -> str:
     """
     if not Path(path).is_file():
         logger.info(
-            f'[yellow]Cannot get file description: "{path}" file does not exist[/yellow]'
+            f'<yellow>Cannot get file description: "{path}" file does not exist</yellow>'
         )
         return ""
 
@@ -1037,8 +1050,8 @@ def update_api_modules_dependents_rn(
     api_module_set = get_api_module_ids(added)
     api_module_set = api_module_set.union(get_api_module_ids(modified))
     logger.info(
-        f"[yellow]Changes were found in the following APIModules : {api_module_set}, updating all dependent "
-        f"integrations.[/yellow]"
+        f"<yellow>Changes were found in the following APIModules : {api_module_set}, updating all dependent "
+        f"integrations.</yellow>"
     )
     with ContentGraphInterface() as graph:
         update_content_graph(graph, use_git=True, dependencies=True)
@@ -1082,7 +1095,7 @@ def check_docker_image_changed(main_branch: str, packfile: str) -> Optional[str]
             return None
         else:
             logger.info(
-                f"[yellow]skipping docker image check, Encountered the following error:\n{e.args[0]}[/yellow]"
+                f"<yellow>skipping docker image check, Encountered the following error:\n{e.args[0]}</yellow>"
             )
             return None
     else:
@@ -1110,7 +1123,32 @@ def get_from_version_at_update_rn(path: str) -> Optional[str]:
     """
     if not Path(path).is_file():
         logger.info(
-            f'[yellow]Cannot get file fromversion: "{path}" file does not exist[/yellow]'
+            f'<yellow>Cannot get file fromversion: "{path}" file does not exist</yellow>'
         )
         return None
     return get_from_version(path)
+
+
+def format_playbook_description(desc: str) -> str:
+    """Format a playbook description for RN.
+
+    :param:
+        desc (str): The description to format.
+
+    :rtype: ``str``
+    :return:
+        The formatted description.
+    """
+    desc = f"\n{desc}"
+    key_phrases = (
+        (5, "This playbook addresses the following alerts:\n"),
+        (5, "Playbook Stages:\n"),
+        (5, "Requirements:\n"),
+        (6, "Triage:\n"),
+        (6, "Early Containment:\n"),
+        (6, "Investigation:\n"),
+        (6, "Containment:\n"),
+    )
+    for hdr, phrase in key_phrases:
+        desc = desc.replace(f"\n{phrase}", f'\n{"#" * hdr} {phrase}')
+    return desc.lstrip("\n")

@@ -20,11 +20,11 @@ import os
 
 import astroid
 from pylint.checkers import BaseChecker
-from pylint.interfaces import IAstroidChecker
+from pylint.typing import MessageDefinitionTuple
 
 # --------------------------------------------------- Messages --------------------------------------------------------
 
-xsoar_msg = {
+xsoar_msg: dict[str, MessageDefinitionTuple] = {
     "W9014": (
         "Function arguments are missing type annotations. Please add type annotations",
         "missing-arg-type-annoation",
@@ -47,7 +47,6 @@ xsoar_msg = {
 
 
 class XsoarChecker(BaseChecker):
-    __implements__ = IAstroidChecker
     name = "xsoar-checker"
     priority = -1
     msgs = xsoar_msg
@@ -125,13 +124,11 @@ class XsoarChecker(BaseChecker):
         try:
             # exclude scripts as are not obligated to raise NotImplementedError in the main func.
             if not self.is_script:
-
                 if node.name == "main":
                     not_implemented_error_exist = False
 
                     # Iterate over each child node of the FuncDef main Node.
                     for child in self._inner_search(node):
-
                         # In case the NotImplementedError appears as part of a raise node.
                         if (
                             isinstance(child, astroid.Raise)
@@ -182,7 +179,6 @@ class XsoarChecker(BaseChecker):
                 isinstance(node.parent, astroid.Assign)
                 and node not in node.parent.targets
             ):
-
                 # Checks for demisto.args()[] implementation.
                 if (
                     node.value.func.expr.name == "demisto"

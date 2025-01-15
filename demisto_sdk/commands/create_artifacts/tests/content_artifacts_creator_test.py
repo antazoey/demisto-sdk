@@ -1,4 +1,3 @@
-import logging
 from contextlib import contextmanager
 from filecmp import dircmp
 from pathlib import Path
@@ -14,14 +13,12 @@ from demisto_sdk.commands.common.constants import (
 )
 from demisto_sdk.commands.common.handlers import DEFAULT_JSON_HANDLER as json
 from demisto_sdk.commands.common.handlers import DEFAULT_YAML_HANDLER as yaml
+from demisto_sdk.commands.common.logger import logger
 from demisto_sdk.commands.common.tools import src_root
 from demisto_sdk.commands.prepare_content.prepare_upload_manager import (
     PrepareUploadManager,
 )
-from TestSuite.test_tools import ChangeCWD, flatten_call_args
-
-logger = logging.getLogger("demisto-sdk")
-
+from TestSuite.test_tools import ChangeCWD
 
 TEST_DATA = src_root() / "tests" / "test_files"
 TEST_CONTENT_REPO = TEST_DATA / "content_slim"
@@ -352,7 +349,7 @@ def test_duplicate_file_failure(mock_git):
 
 
 @pytest.mark.parametrize("key, tool", [("some_key", False), ("", True)])
-def test_sign_packs_failure(repo, mocker, key, tool, monkeypatch):
+def test_sign_packs_failure(repo, mocker, key, tool, caplog):
     """
     When:
         - Signing a pack.
@@ -365,15 +362,12 @@ def test_sign_packs_failure(repo, mocker, key, tool, monkeypatch):
         - Verify that exceptions are written to the logger.
 
     """
-    import demisto_sdk.commands.create_artifacts.content_artifacts_creator as cca
     from demisto_sdk.commands.create_artifacts.content_artifacts_creator import (
         ArtifactsManager,
         sign_packs,
     )
 
-    logger = mocker.patch.object(logging.getLogger("demisto-sdk"), "error")
-    cca.logger = logger
-    monkeypatch.setenv("COLUMNS", "1000")
+    caplog.set_level("ERROR")
 
     with ChangeCWD(repo.path):
         with temp_dir() as temp:
@@ -394,10 +388,9 @@ def test_sign_packs_failure(repo, mocker, key, tool, monkeypatch):
                 artifact_manager.signDirectory = Path(temp / "tool")
 
     sign_packs(artifact_manager)
-    logged = flatten_call_args(logger.error.call_args_list)
     assert (
         "Failed to sign packs. In order to do so, you need to provide both signature_key and "
-        "sign_directory arguments." in logged[0]
+        "sign_directory arguments." in caplog.records[0].message
     )
 
 
@@ -456,7 +449,7 @@ def get_value_from_dict(object, path):
         (
             "demisto_sdk/tests/test_files/content_repo_with_alternative_fields/Packs/"
             "DummyPackAlternativeFields/Scripts/script-sample_packs.yml",
-            ["commonfields.id", "name", "comment"],
+            ["name", "comment"],
         ),
     ],
 )
@@ -474,5 +467,6 @@ def test_use_alternative_fields(artifact: str, keys_paths: List[str]):
         modified_data = load_file(output_file)
         for current_key_path in keys_paths:
             assert get_value_from_dict(
-                original_data, current_key_path + "_x2"
+                original_data,
+                current_key_path + ":" + MarketplaceVersions.MarketplaceV2.value,
             ) == get_value_from_dict(modified_data, current_key_path)

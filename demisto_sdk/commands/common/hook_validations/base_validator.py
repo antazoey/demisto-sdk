@@ -196,7 +196,7 @@ class BaseValidator:
                 self.check_file_flags(file_name, file_path)
             except FileNotFoundError:
                 logger.info(
-                    f"[yellow]File {file_path} not found, cannot check its flags (deprecated, etc)[/yellow]"
+                    f"<yellow>File {file_path} not found, cannot check its flags (deprecated, etc)</yellow>"
                 )
 
             rel_file_path = get_relative_path_from_packs_dir(file_path)
@@ -235,7 +235,7 @@ class BaseValidator:
             or warning
         ):
             if self.print_as_warnings or warning:
-                logger.warning(f"[yellow]{formatted_error_str()}[/yellow]")
+                logger.warning(f"<yellow>{formatted_error_str()}</yellow>")
                 self.json_output(file_path, error_code, error_message, warning)
                 self.add_to_report_error_list(
                     error_code, file_path, FOUND_FILES_AND_IGNORED_ERRORS
@@ -244,20 +244,20 @@ class BaseValidator:
 
         formatted_error = formatted_error_str()
         if suggested_fix and not is_error_not_allowed_in_pack_ignore:
-            logger.error(f"[red]{formatted_error[:-1]}[/red]")
+            logger.error(f"<red>{formatted_error[:-1]}</red>")
             if error_code == "ST109":
-                logger.info("[red]Please add to the root of the yml.[/red]\n")
+                logger.info("<red>Please add to the root of the yml.</red>\n")
             elif error_code == "ST107":
                 missing_field = error_message.split(" ")[3]
                 path_to_add = error_message.split(":")[1]
                 logger.info(
-                    f"[red]Please add the field {missing_field} to the path: {path_to_add} in the yml.[/red]\n"
+                    f"<red>Please add the field {missing_field} to the path: {path_to_add} in the yml.</red>\n"
                 )
             else:
-                logger.info(f"[red]{suggested_fix}[/red]\n")
+                logger.info("<red>{}</red>\n", suggested_fix)  # noqa: PLE1205
 
         else:
-            logger.error(f"[red]{formatted_error}[/red]")
+            logger.error("<red>{}</red>", formatted_error)  # noqa: PLE1205
 
         self.json_output(file_path, error_code, error_message, warning)
         self.add_to_report_error_list(error_code, file_path, FOUND_FILES_AND_ERRORS)
@@ -266,9 +266,7 @@ class BaseValidator:
         ):  # warnings are not printed
             github_annotation_message = (
                 f"{error_message}\n{suggested_fix}" if suggested_fix else error_message
-            ).replace(
-                "\n", "%0A"
-            )  # GitHub action syntax
+            ).replace("\n", "%0A")  # GitHub action syntax
             print(  # noqa: T201
                 f"::error file={file_path},line=1,endLine=1,title=Validation Error {error_code}::{github_annotation_message}"
             )
@@ -282,7 +280,7 @@ class BaseValidator:
 
     def check_deprecated(self, file_path):
         if file_path.endswith(".yml"):
-            yml_dict = get_yaml(file_path)
+            yml_dict = get_yaml(file_path, keep_order=False)
             if not isinstance(yml_dict, list) and yml_dict.get("deprecated"):
                 # yml files may be list or dict-like
                 self.add_flag_to_ignore_list(file_path, "deprecated")
@@ -291,11 +289,7 @@ class BaseValidator:
     def get_metadata_file_content(meta_file_path):
         if not Path(meta_file_path).exists():
             return {}
-
-        with open(meta_file_path, encoding="utf-8") as file:
-            metadata_file_content = file.read()
-
-        return json.loads(metadata_file_content)
+        return get_json(meta_file_path)
 
     def update_checked_flags_by_support_level(self, file_path):
         pack_name = get_pack_name(file_path)
@@ -449,13 +443,11 @@ class BaseValidator:
         Returns:
             bool: True if no such terms were found, False otherwise.
         """
-        disallowed_terms = (
-            [  # These terms are checked regardless for case (case-insensitive)
-                "test-module",
-                "test module",
-                "long-running-execution",
-            ]
-        )
+        disallowed_terms = [  # These terms are checked regardless for case (case-insensitive)
+            "test-module",
+            "test module",
+            "long-running-execution",
+        ]
 
         found_terms = []
 

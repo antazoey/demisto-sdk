@@ -4,7 +4,6 @@ from typing import Dict
 import pytest
 
 from demisto_sdk.commands.common import tools
-from demisto_sdk.commands.common.constants import EXCLUDED_DISPLAY_NAME_WORDS
 from demisto_sdk.commands.common.hook_validations.base_validator import BaseValidator
 from demisto_sdk.commands.common.hook_validations.pack_unique_files import (
     PACK_METADATA_NAME,
@@ -56,10 +55,6 @@ class TestPackMetadataValidator:
         ],
     )
     def test_metadata_validator_valid(self, mocker, metadata):
-        mocker.patch(
-            "demisto_sdk.commands.common.hook_validations.integration.tools.get_current_categories",
-            return_value=["Data Enrichment & Threat Intelligence"],
-        )
         mocker.patch.object(
             tools, "get_dict_from_file", return_value=({"approved_list": {}}, "json")
         )
@@ -176,24 +171,6 @@ class TestPackMetadataValidator:
         validator = PackUniqueFilesValidator("fake")
         mocker.patch.object(validator, "_add_error", return_value=True)
         assert validator.validate_pack_name(metadata_content) == expected
-
-    def test_name_does_not_contain_excluded_word(self):
-        """
-        Given:
-        - Pack name.
-
-        When:
-        - Validating pack name does not contain excluded word.
-
-        Then:
-        - Ensure expected result is returned.
-        """
-        pack_name: str = "Bitcoin Abuse"
-        validator = PackUniqueFilesValidator("fake")
-        assert validator.name_does_not_contain_excluded_word(pack_name)
-        for excluded_word in EXCLUDED_DISPLAY_NAME_WORDS:
-            invalid_pack_name: str = f"{pack_name} ({excluded_word})"
-            assert not validator.name_does_not_contain_excluded_word(invalid_pack_name)
 
     @staticmethod
     def read_file(file_):
@@ -421,56 +398,3 @@ class TestPackMetadataValidator:
         assert validator.should_pack_be_deprecated() == should_pack_be_deprecated
 
     VALID_CATEGORIES_LIST = ["Endpoint", "File Integrity Management"]
-
-    @pytest.mark.parametrize(
-        "metadata_content, expected_results, valid_list_mock",
-        [
-            ({"categories": ["Endpoint"]}, True, VALID_CATEGORIES_LIST),
-            ({"categories": ["Analytics & SIEMM"]}, False, VALID_CATEGORIES_LIST),
-            (
-                {"categories": ["Endpoint", "File Integrity Management"]},
-                False,
-                VALID_CATEGORIES_LIST,
-            ),
-            (
-                {"categories": ["Analytics & SIEMM", "random category"]},
-                False,
-                VALID_CATEGORIES_LIST,
-            ),
-            (
-                {"categories": ["Analytics & SIEMM", "Endpoint"]},
-                False,
-                VALID_CATEGORIES_LIST,
-            ),
-        ],
-    )
-    def test_is_categories_field_match_standard(
-        self, mocker, metadata_content, expected_results, valid_list_mock
-    ):
-        """
-        Given:
-            - A pack metadata content and a list of approved categories.
-            - case 1: pack metadata content with one valid category and the valid categories list.
-            - case 2: pack metadata content with one invalid category and the valid categories list.
-            - case 3: pack metadata content with two valid categories and the valid categories list.
-            - case 4: pack metadata content with two invalid categories and the valid categories list.
-            - case 5: pack metadata content with one invalid category and one valid category, and the valid categories list.
-
-        When:
-            - running is_categories_field_match_standard function.
-
-        Then:
-            - Ensure that the categories field was validated correctly.
-            - case 1: Should return True.
-            - case 2: Should return False.
-            - case 3: Should return False.
-            - case 4: Should return False.
-            - case 5: Should return False.
-        """
-        mocker.patch(
-            "demisto_sdk.commands.common.hook_validations.integration.tools.get_current_categories",
-            return_value=valid_list_mock,
-        )
-        validator = PackUniqueFilesValidator("test")
-        validator.metadata_content = metadata_content
-        assert validator.is_categories_field_match_standard() is expected_results

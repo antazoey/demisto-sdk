@@ -1,5 +1,5 @@
 import os
-from pathlib import Path
+from pathlib import Path, PosixPath
 from typing import Optional, Tuple
 
 import git
@@ -80,9 +80,9 @@ class UpdateReleaseNotesManager:
         self.create_release_notes(modified_files, added_files, old_format_files)
         if len(self.total_updated_packs) > 1:
             logger.info(
-                "\n[green]Successfully updated the following packs:\n"
+                "\n<green>Successfully updated the following packs:\n"
                 + "\n".join(self.total_updated_packs)
-                + "[/green]"
+                + "</green>"
             )
 
     def filter_to_relevant_files(
@@ -106,7 +106,25 @@ class UpdateReleaseNotesManager:
 
             filtered_set.add(file)
 
-        return validate_manager.filter_to_relevant_files(filtered_set)
+        changed_meta_files = validate_manager.pack_metadata_extraction(
+            filtered_set, set(), set()
+        )
+        changed_meta_that_should_have_version_raised = (
+            validate_manager.get_changed_meta_files_that_should_have_version_raised(
+                changed_meta_files
+            )
+        )
+
+        filtered_set -= set(
+            map(
+                PosixPath,
+                changed_meta_files - changed_meta_that_should_have_version_raised,
+            )
+        )
+        return validate_manager.filter_to_relevant_files(
+            filtered_set,
+            check_metadata_files=bool(changed_meta_that_should_have_version_raised),
+        )
 
     def filter_files_from_git(
         self,
@@ -264,8 +282,8 @@ class UpdateReleaseNotesManager:
                 )
         else:
             logger.info(
-                "[yellow]No changes that require release notes were detected. If such changes were made, "
-                "please commit the changes and rerun the command.[/yellow]"
+                "<yellow>No changes that require release notes were detected. If such changes were made, "
+                "please commit the changes and rerun the command.</yellow>"
             )
 
     def create_pack_release_notes(
@@ -324,9 +342,9 @@ class UpdateReleaseNotesManager:
                     os.unlink(self.packs_existing_rn[pack])
         else:
             logger.info(
-                f"[yellow]Either no changes were found in {pack} pack "
+                f"<yellow>Either no changes were found in {pack} pack "
                 f"or the changes found should not be documented in the release notes file.\n"
-                f"If relevant changes were made, please commit the changes and rerun the command.[/yellow]"
+                f"If relevant changes were made, please commit the changes and rerun the command.</yellow>"
             )
 
     def get_existing_rn(self, pack) -> Optional[str]:

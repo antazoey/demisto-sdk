@@ -1,6 +1,7 @@
+from abc import abstractmethod
 from pathlib import Path
 from tempfile import TemporaryDirectory
-from typing import TYPE_CHECKING, Any, Callable, List, Optional, Set
+from typing import TYPE_CHECKING, Any, Callable, List, Optional, Set, Union
 
 import demisto_client
 from packaging.version import Version
@@ -26,12 +27,14 @@ from demisto_sdk.commands.common.logger import logger
 from demisto_sdk.commands.common.tools import (
     get_file,
     get_pack_name,
+    get_relative_path,
     replace_incident_to_alert,
     write_dict,
 )
 from demisto_sdk.commands.content_graph.common import (
     ContentType,
     RelationshipType,
+    replace_marketplace_references,
 )
 from demisto_sdk.commands.content_graph.objects.base_content import (
     BaseContent,
@@ -52,6 +55,8 @@ class ContentItem(BaseContent):
     description: Optional[str] = ""
     is_test: bool = False
     pack: Any = Field(None, exclude=True, repr=False)
+    support: str = ""
+    is_silent: bool = False
 
     @validator("path", always=True)
     def validate_path(cls, v: Path, values) -> Path:
@@ -61,39 +66,38 @@ class ContentItem(BaseContent):
             return CONTENT_PATH / v
         return CONTENT_PATH.with_name(values.get("source_repo", "content")) / v
 
+    @staticmethod
+    @abstractmethod
+    def match(_dict: dict, path: Path) -> bool:
+        """
+        This function checks whether the file in the given path is of the content item type.
+        """
+        pass
+
     @property
     def pack_id(self) -> str:
         return self.in_pack.pack_id if self.in_pack else ""
 
-    @property
-    def support_level(self) -> str:
-        return (
-            self.in_pack.support_level
-            if self.in_pack and self.in_pack.support_level
-            else ""
-        )
+    @validator("pack", always=True)
+    def validate_pack(cls, v: Any, values) -> Optional["Pack"]:
+        # Validate that we have the pack containing the content item.
+        # The pack is either provided directly or needs to be located.
 
-    @property
-    def ignored_errors(self) -> list:
-        try:
-            return (
-                list(
-                    self.in_pack.ignored_errors_dict.get(  # type: ignore
-                        f"file:{self.path.name}", []
-                    ).items()
-                )[0][1].split(",")
-                or []
-            )
-        except:  # noqa: E722
-            return []
+        if v and not isinstance(v, fields.FieldInfo):
+            return v
+        return cls.get_pack(values.get("relationships_data"), values.get("path"))
 
-    @property
-    def pack_name(self) -> str:
-        return self.in_pack.name if self.in_pack else ""
+    @validator("support", always=True)
+    def validate_support(cls, v: str, values) -> str:
+        # Ensure the 'support' field is present.
+        # If not directly provided, the support level from the associated pack will be used.
+        if v:
+            return v
+        pack = values.get("pack")
+        if pack and pack.support:
+            return pack.support
 
-    @property
-    def pack_version(self) -> Optional[Version]:
-        return self.in_pack.pack_version if self.in_pack else None
+        return ""
 
     @property
     def in_pack(self) -> Optional["Pack"]:
@@ -103,22 +107,67 @@ class ContentItem(BaseContent):
         Returns:
             Pack: Pack model.
         """
-        # This function converts the pack attribute, which is a parser object to the pack model
-        # This happens since we cant mark the pack type as `Pack` because it is a forward reference.
-        # When upgrading to pydantic v2, remove this method and change pack type to `Pack` directly.
-        pack = self.pack
-        if not pack or isinstance(pack, fields.FieldInfo):
-            pack = None
-            if in_pack := self.relationships_data[RelationshipType.IN_PACK]:
-                pack = next(iter(in_pack)).content_item_to  # type: ignore[return-value]
+        if not self.pack:
+            self.pack = ContentItem.get_pack(self.relationships_data, self.path)
+        return self.pack  # type: ignore[return-value]
+
+    @staticmethod
+    def get_pack(
+        relationships_data: dict,
+        path: Path,
+    ) -> Optional["Pack"]:
+        """
+        Returns the Pack which the content item is in.
+
+        Returns:
+            Pack: Pack model.
+        """
+        pack = None
+        if in_pack := relationships_data[RelationshipType.IN_PACK]:
+            pack = next(iter(in_pack)).content_item_to  # type: ignore[return-value]
         if not pack:
-            if pack_name := get_pack_name(self.path):
+            if pack_name := get_pack_name(path):
                 pack = BaseContent.from_path(
-                    CONTENT_PATH / PACKS_FOLDER / pack_name
+                    CONTENT_PATH / PACKS_FOLDER / pack_name, metadata_only=True
                 )  # type: ignore[assignment]
-        if pack:
-            self.pack = pack
         return pack  # type: ignore[return-value]
+
+    @property
+    def ignored_errors(self) -> List[str]:
+        if ignored_errors := self.get_ignored_errors(self.path.name):
+            return ignored_errors
+        file_path = get_relative_path(self.path, CONTENT_PATH)
+        return self.get_ignored_errors(file_path)
+
+    def ignored_errors_related_files(self, file_path: Path) -> List[str]:
+        if ignored_errors := self.get_ignored_errors((Path(file_path)).name):
+            return ignored_errors
+        file_path = get_relative_path(file_path, CONTENT_PATH)
+        return self.get_ignored_errors(file_path)
+
+    def get_ignored_errors(self, path: Union[str, Path]) -> List[str]:
+        try:
+            return (
+                list(
+                    self.in_pack.ignored_errors_dict.get(  # type: ignore
+                        f"file:{path}", []
+                    ).items()
+                )[0][1].split(",")
+                or []
+            )
+        except:  # noqa: E722
+            logger.debug(
+                f"Failed to extract ignored errors list from {path} for {self.object_id}"
+            )
+            return []
+
+    @property
+    def pack_name(self) -> str:
+        return self.in_pack.name if self.in_pack else ""
+
+    @property
+    def pack_version(self) -> Optional[Version]:
+        return self.in_pack.pack_version if self.in_pack else None
 
     @property
     def uses(self) -> List["RelationshipData"]:
@@ -206,11 +255,15 @@ class ContentItem(BaseContent):
         return get_file(self.path, keep_order=False)
 
     @property
+    def text(self) -> str:
+        return get_file(self.path, return_content=True)
+
+    @property
     def ordered_data(self) -> dict:
         return get_file(self.path, keep_order=True)
 
-    def save(self):
-        super()._save(self.path, self.ordered_data)
+    def save(self, fields_to_exclude: List[str] = []):
+        super()._save(self.path, self.ordered_data, fields_to_exclude=fields_to_exclude)
 
     def prepare_for_upload(
         self,
@@ -221,9 +274,10 @@ class ContentItem(BaseContent):
             raise FileNotFoundError(f"Could not find file {self.path}")
         data = self.data
         logger.debug(f"preparing {self.path}")
-        return MarketplaceSuffixPreparer.prepare(
-            data, current_marketplace, self.marketplaces
-        )
+
+        # Replace incorrect marketplace references
+        data = replace_marketplace_references(data, current_marketplace, str(self.path))
+        return MarketplaceSuffixPreparer.prepare(data, current_marketplace)
 
     def summary(
         self,
@@ -286,15 +340,7 @@ class ContentItem(BaseContent):
         for _ in range(2):
             # we iterate twice to handle cases of doubled prefixes like `classifier-mapper-`
             for prefix in server_names:
-                try:
-                    name = name.removeprefix(f"{prefix}-")  # type: ignore[attr-defined]
-                except AttributeError:
-                    # not supported in python 3.8
-                    name = (
-                        name[len(prefix) + 1 :]
-                        if name.startswith(f"{prefix}-")
-                        else name
-                    )
+                name = name.removeprefix(f"{prefix}-")
         normalized = f"{self.content_type.server_name}-{name}"
         logger.debug(f"Normalized file name from {name} to {normalized}")
         return normalized

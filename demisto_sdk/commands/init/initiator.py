@@ -11,8 +11,8 @@ from packaging.version import Version
 from demisto_sdk.commands.common import tools
 from demisto_sdk.commands.common.configuration import Configuration
 from demisto_sdk.commands.common.constants import (
+    ASSETS_MODELING_RULES_DIR,
     CLASSIFIERS_DIR,
-    CONNECTIONS_DIR,
     CORRELATION_RULES_DIR,
     DASHBOARDS_DIR,
     DEFAULT_CONTENT_ITEM_FROM_VERSION,
@@ -111,6 +111,7 @@ class Initiator:
     HELLO_WORLD_EVENT_COLLECTOR_INTEGRATION = "HelloWorldEventCollector"
     HELLO_WORLD_PARSING_RULES = "HelloWorldParsingRules"
     HELLO_WORLD_MODELING_RULES = "HelloWorldModelingRules"
+    HELLO_WORLD_ASSETS_MODELING_RULES = "HelloWorldAssetsModelingRules"
 
     INTEGRATION_TEMPLATE_OPTIONS = [
         HELLO_WORLD_EVENT_COLLECTOR_INTEGRATION,
@@ -136,14 +137,16 @@ class Initiator:
         os.path.join(TEST_DATA_DIR, "baseintegration-dummy.json")
     }
 
-    DEFAULT_EVENT_COLLECTOR_TEST_DATA_FILES = {
-        os.path.join(TEST_DATA_DIR, "baseintegrationEventCollector-dummy.json")
-    }
-
     TEMPLATE_MODELING_RULES_FILES = {
         "HelloWorldModelingRules_schema.json",
         "HelloWorldModelingRules.xif",
         "HelloWorldModelingRules.yml",
+    }
+
+    TEMPLATE_ASSETS_MODELING_RULES_FILES = {
+        "HelloWorldAssetsModelingRules_schema.json",
+        "HelloWorldAssetsModelingRules.xif",
+        "HelloWorldAssetsModelingRules.yml",
     }
 
     TEMPLATE_PARSING_RULES_FILES = {
@@ -194,7 +197,11 @@ class Initiator:
     DEFAULT_TEMPLATE_PACK_NAME = "StarterPack"
     HELLO_WORLD_PACK_NAME = "HelloWorld"
     DEFAULT_TEMPLATES = [DEFAULT_INTEGRATION_TEMPLATE, DEFAULT_SCRIPT_TEMPLATE]
-    HELLO_WORLD_BASE_TEMPLATES = [HELLO_WORLD_SCRIPT, HELLO_WORLD_INTEGRATION]
+    HELLO_WORLD_BASE_TEMPLATES = [
+        HELLO_WORLD_SCRIPT,
+        HELLO_WORLD_INTEGRATION,
+        HELLO_WORLD_EVENT_COLLECTOR_INTEGRATION,
+    ]
 
     DATE_FORMAT = "%Y-%m-%dT%H:%M:%SZ"
     PACK_INITIAL_VERSION = "1.0.0"
@@ -211,7 +218,6 @@ class Initiator:
         LAYOUTS_DIR,
         TEST_PLAYBOOKS_DIR,
         CLASSIFIERS_DIR,
-        CONNECTIONS_DIR,
         DASHBOARDS_DIR,
         INDICATOR_TYPES_DIR,
         REPORTS_DIR,
@@ -231,6 +237,7 @@ class Initiator:
         XSIAM_REPORTS_DIR,
         MODELING_RULES_DIR,
         PARSING_RULES_DIR,
+        ASSETS_MODELING_RULES_DIR,
     ]
 
     def __init__(
@@ -456,10 +463,23 @@ class Initiator:
             False,
             False,
         )
-        if not parsing_rules_initiator.modeling_parsing_rules_init(
-            is_parsing_rules=True,
-        ) or not modeling_rules_initiator.modeling_parsing_rules_init(
-            is_modeling_rules=True, product=product, vendor=vendor
+        assets_modeling_rules_initiator = self.create_initiator(
+            os.path.join(self.full_output_path, ASSETS_MODELING_RULES_DIR),
+            self.HELLO_WORLD_ASSETS_MODELING_RULES,
+            False,
+            False,
+            False,
+        )
+        if (
+            not parsing_rules_initiator.modeling_parsing_rules_init(
+                is_parsing_rules=True,
+            )
+            or not modeling_rules_initiator.modeling_parsing_rules_init(
+                is_modeling_rules=True, product=product, vendor=vendor
+            )
+            or not assets_modeling_rules_initiator.modeling_parsing_rules_init(
+                is_assets_modeling_rules=True, product=product, vendor=vendor
+            )
         ):
             return False
         return True
@@ -504,7 +524,7 @@ class Initiator:
 
         self.create_pack_base_files()
         logger.info(
-            f"[green]Successfully created the pack {self.dir_name} in: {self.full_output_path}[/green]"
+            f"<green>Successfully created the pack {self.dir_name} in: {self.full_output_path}</green>"
         )
 
         metadata_path = os.path.join(self.full_output_path, "pack_metadata.json")
@@ -523,13 +543,13 @@ class Initiator:
             json.dump(pack_metadata, fp, indent=4)
 
             logger.info(
-                f"[green]Created pack metadata at path : {metadata_path}[/green]"
+                f"<green>Created pack metadata at path : {metadata_path}</green>"
             )
 
         create_integration = str(
             input("\nDo you want to create an integration in the pack? Y/N ")
         ).lower()
-        if string_to_bool(create_integration):
+        if string_to_bool(create_integration, default_when_empty=False):
             if not self.marketplace == MarketplaceVersions.MarketplaceV2:
                 is_same_category = str(
                     input(
@@ -562,6 +582,7 @@ class Initiator:
         vendor: Optional[str] = None,
         is_parsing_rules: bool = False,
         is_modeling_rules: bool = False,
+        is_assets_modeling_rules: bool = False,
     ) -> bool:
         """Creates a parsing or modeling rules directory tree.
 
@@ -571,11 +592,15 @@ class Initiator:
         dirname = get_dir_name_for_xsiam_item(
             is_modeling_rules=is_modeling_rules,
             is_parsing_rules=is_parsing_rules,
+            is_assets_modeling_rules=is_assets_modeling_rules,
             name="",
         )
 
         xsiam_content_dir_name = get_dir_name_for_xsiam_item(
-            is_parsing_rules, is_modeling_rules, name=self.dir_name
+            is_parsing_rules,
+            is_modeling_rules,
+            is_assets_modeling_rules,
+            name=self.dir_name,
         )
         self.full_output_path = str(Path(self.output).joinpath(xsiam_content_dir_name))
         rules_template_files = self.get_template_files()
@@ -598,11 +623,13 @@ class Initiator:
                 current_suffix=self.template,
                 is_parsing_rules=is_parsing_rules,
                 is_modeling_rules=is_modeling_rules,
+                is_assets_modeling_rules=is_assets_modeling_rules,
             )
             self.modeling_or_parsing_rules_yml_reformatting(
                 current_suffix=self.dir_name,
                 is_modeling_rules=is_modeling_rules,
                 is_parsing_rules=is_parsing_rules,
+                is_assets_modeling_rules=is_assets_modeling_rules,
                 product=product,
                 vendor=vendor,
             )
@@ -807,7 +834,7 @@ class Initiator:
                     f.write("\n")
         except FileNotFoundError:
             logger.info(
-                "[yellow]Could not find the .secrets-ignore file - make sure your path is correct[/yellow]"
+                "<yellow>Could not find the .secrets-ignore file - make sure your path is correct</yellow>"
             )
 
     def verify_output_path_for_xsiam_content(self) -> bool:
@@ -819,7 +846,7 @@ class Initiator:
             return True
         if not self.output:
             logger.error(
-                "[red]An output directory is required to utilize the --xsiam flag. Please attempt the operation again using the -o flag to specify the output directory.[/red]"
+                "<red>An output directory is required to utilize the --xsiam flag. Please attempt the operation again using the -o flag to specify the output directory.</red>"
             )
             return False
         # Check if the output path matches either the Integrations directory or a subdirectory under Packs
@@ -828,7 +855,7 @@ class Initiator:
         )
         if not valid_output_path:
             logger.error(
-                "[red]The output directory is invalid - make sure the name looks like one of the following: Packs/**/Integrations [/red]"
+                "<red>The output directory is invalid - make sure the name looks like one of the following: Packs/**/Integrations </red>"
             )
             return False
         return True
@@ -907,8 +934,8 @@ class Initiator:
             if secrets:
                 new_line = "\n"
                 logger.info(
-                    f"\n[green]The following secrets were detected:\n"
-                    f"{new_line.join(secret for secret in secrets)}[/green]"
+                    f"\n<green>The following secrets were detected:\n"
+                    f"{new_line.join(secret for secret in secrets)}</green>"
                 )
 
                 ignore_secrets = input(
@@ -918,7 +945,7 @@ class Initiator:
                     self.ignore_secrets(secrets)
 
         logger.info(
-            f"[green]Finished creating integration: {self.full_output_path}.[/green]"
+            f"<green>Finished creating integration: {self.full_output_path}.</green>"
         )
 
         return True
@@ -968,8 +995,8 @@ class Initiator:
         if secrets:
             new_line = "\n"
             logger.info(
-                f"\n[green]The following secrets were detected in the pack:\n"
-                f"{new_line.join(secret for secret in secrets)}[/green]"
+                f"\n<green>The following secrets were detected in the pack:\n"
+                f"{new_line.join(secret for secret in secrets)}</green>"
             )
 
             ignore_secrets = input(
@@ -978,7 +1005,7 @@ class Initiator:
             if ignore_secrets in ["y", "yes"]:
                 self.ignore_secrets(secrets)
 
-        logger.info(f"[green]Finished creating script: {self.full_output_path}[/green]")
+        logger.info(f"<green>Finished creating script: {self.full_output_path}</green>")
 
         return True
 
@@ -1014,8 +1041,13 @@ class Initiator:
         )
         if schema_json_path.exists():
             schema_json = get_file(schema_json_path)
-            hello_world_raw = schema_json["hello_world_raw"]
-            dict_for_schema = {f"{vendor}_{product}_raw": hello_world_raw}
+            hello_world_raw = schema_json.get("hello_world_raw") or schema_json.get(
+                "hello_world_assets_raw"
+            )
+            if "hello_world_assets_raw" in schema_json:
+                dict_for_schema = {f"{vendor}_{product}_assets_raw": hello_world_raw}
+            else:
+                dict_for_schema = {f"{vendor}_{product}_raw": hello_world_raw}
             with open(schema_json_path, "w") as f:
                 json.dump(dict_for_schema, f, indent=4)
 
@@ -1026,6 +1058,7 @@ class Initiator:
         vendor: Optional[str] = None,
         is_modeling_rules: bool = False,
         is_parsing_rules: bool = False,
+        is_assets_modeling_rules: bool = False,
     ):
         """Formats the given yml to fit the newly created modeling/pursing rules.
 
@@ -1037,6 +1070,7 @@ class Initiator:
         yml_file_name = get_dir_name_for_xsiam_item(
             is_modeling_rules=is_modeling_rules,
             is_parsing_rules=is_parsing_rules,
+            is_assets_modeling_rules=is_assets_modeling_rules,
             name=current_suffix,
         )
         yml_path = (
@@ -1053,6 +1087,10 @@ class Initiator:
         )
 
         content_item = "modeling rules" if is_modeling_rules else "parsing rules"
+        content_item = (
+            "assets modeling rules" if is_assets_modeling_rules else content_item
+        )
+
         if from_version := input(
             f"\nThe fromversion value that will be used for {content_item} (optional): "
         ):
@@ -1064,7 +1102,7 @@ class Initiator:
         ):
             yml_dict["fromversion"] = self.SUPPORTED_FROM_VERSION_XSIAM
             logger.info(
-                "[yellow]The version is not provided or is lower than the supported version; the value will be set to the default version. [/yellow]"
+                "<yellow>The version is not provided or is lower than the supported version; the value will be set to the default version. </yellow>"
             )
         with open(yml_path, "w") as f:
             yaml.dump(yml_dict, f)
@@ -1140,7 +1178,7 @@ class Initiator:
         ):
             yml_dict["fromversion"] = compared_version
             logger.info(
-                "[yellow]The selected version is lower than the supported version; the value will be set to the default version. [/yellow]"
+                "<yellow>The selected version is lower than the supported version; the value will be set to the default version. </yellow>"
             )
 
         if integration:
@@ -1188,6 +1226,7 @@ class Initiator:
         current_suffix: str,
         is_modeling_rules: bool = False,
         is_parsing_rules: bool = False,
+        is_assets_modeling_rules: bool = False,
     ):
         """Renames the python, description, test and image file in the path to fit the newly created integration/script
 
@@ -1225,10 +1264,11 @@ class Initiator:
                 )
             )
 
-        if is_parsing_rules or is_modeling_rules:
+        if is_parsing_rules or is_modeling_rules or is_assets_modeling_rules:
             name = get_dir_name_for_xsiam_item(
                 is_modeling_rules=is_modeling_rules,
                 is_parsing_rules=is_parsing_rules,
+                is_assets_modeling_rules=is_assets_modeling_rules,
                 name=self.dir_name,
             )
             current_file_path = full_output_path.joinpath(f"{current_suffix}")
@@ -1284,7 +1324,7 @@ class Initiator:
                 os.mkdir(self.full_output_path)
 
             else:
-                logger.info(f"[red]Pack not created in {self.full_output_path}[/red]")
+                logger.info(f"<red>Pack not created in {self.full_output_path}</red>")
                 return False
 
         return True
@@ -1364,14 +1404,12 @@ class Initiator:
                 template_files = template_files.union(
                     self.DEFAULT_INTEGRATION_TEST_DATA_FILES
                 )
-            elif self.template == self.HELLO_WORLD_EVENT_COLLECTOR_INTEGRATION:
-                template_files = template_files.union(
-                    self.DEFAULT_EVENT_COLLECTOR_TEST_DATA_FILES
-                )
         elif self.template == self.HELLO_WORLD_MODELING_RULES:
             template_files = set(self.TEMPLATE_MODELING_RULES_FILES)
         elif self.template == self.HELLO_WORLD_PARSING_RULES:
             template_files = set(self.TEMPLATE_PARSING_RULES_FILES)
+        elif self.template == self.HELLO_WORLD_ASSETS_MODELING_RULES:
+            template_files = set(self.TEMPLATE_ASSETS_MODELING_RULES_FILES)
 
         else:
             template_files = {
@@ -1405,13 +1443,9 @@ class Initiator:
             pack_name = self.DEFAULT_TEMPLATE_PACK_NAME
 
         elif self.template in self.HELLO_WORLD_BASE_TEMPLATES + [
-            self.HELLO_WORLD_FEED_INTEGRATION
-        ]:
-            pack_name = self.HELLO_WORLD_PACK_NAME
-        elif self.template in [
+            self.HELLO_WORLD_FEED_INTEGRATION,
             self.HELLO_WORLD_PARSING_RULES,
             self.HELLO_WORLD_MODELING_RULES,
-            self.HELLO_WORLD_EVENT_COLLECTOR_INTEGRATION,
         ]:
             pack_name = self.HELLO_WORLD_PACK_NAME
         else:
@@ -1442,7 +1476,7 @@ class Initiator:
                     f.write(file_content)
             except Exception:
                 logger.info(
-                    f"[yellow]Could not fetch remote template - {path}. Using local templates instead.[/yellow]"
+                    f"<yellow>Could not fetch remote template - {path}. Using local templates instead.</yellow>"
                 )
                 return False
 
@@ -1467,17 +1501,22 @@ def get_suffix_xsiam_content(
 
 
 def get_dir_name_for_xsiam_item(
-    is_parsing_rules: bool = False, is_modeling_rules: bool = False, name: str = ""
+    is_parsing_rules: bool = False,
+    is_modeling_rules: bool = False,
+    is_assets_modeling_rules: bool = False,
+    name: str = "",
 ) -> str:
     """Gets the correct directory name to the xsiam content item
 
     Args:
         is_parsing_rules (bool): indicating whether the content type is parsing rule.
         is_modeling_rules (bool): indicating whether the content type is modeling rule.
+        is_assets_modeling_rule (bool): indicating whether the content type is assets modeling rule
+        name (bool): name of entity
     """
+    if is_parsing_rules:
+        return f"{name}{PARSING_RULES_DIR}"
+    if is_modeling_rules:
+        return f"{name}{MODELING_RULES_DIR}"
 
-    return (
-        f"{name}{PARSING_RULES_DIR}"
-        if is_parsing_rules
-        else f"{name}{MODELING_RULES_DIR}"
-    )
+    return f"{name}{ASSETS_MODELING_RULES_DIR}"

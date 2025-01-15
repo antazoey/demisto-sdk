@@ -8,6 +8,8 @@ import pytest
 
 from demisto_sdk.commands.common import tools
 from demisto_sdk.commands.common.constants import (
+    ASSETS_MODELING_RULE_ID_SUFFIX,
+    ASSETS_MODELING_RULES_DIR,
     EVENT_COLLECTOR,
     INTEGRATION_CATEGORIES,
     INTEGRATIONS_DIR,
@@ -665,9 +667,7 @@ def test_integration_init_with_ignore_secrets(
     assert res
     assert os.path.isdir(integration_path)
     diff = expected_files.difference(integration_dir_files)
-    assert (
-        not diff
-    ), f"There are missing file's in the files you expected to create, The missing file's are {diff}"
+    assert not diff, f"There are missing file's in the files you expected to create, The missing file's are {diff}"
     assert os.stat(secrets_ignore_path).st_size > 0
 
 
@@ -723,9 +723,7 @@ def test_script_init(initiator, tmpdir, monkeypatch, mocker):
 
     assert res
     assert os.path.isdir(script_path)
-    assert (
-        not diff
-    ), f"There are missing file's in the files you expected to create, The missing file's are {diff}"
+    assert not diff, f"There are missing file's in the files you expected to create, The missing file's are {diff}"
     assert not Path(secrets_ignore_path).exists()
 
 
@@ -778,9 +776,7 @@ def test_script_init_with_ignore_secrets(initiator, tmpdir, monkeypatch, mocker)
 
     assert res
     assert os.path.isdir(script_path)
-    assert (
-        not diff
-    ), f"There are missing file's in the files you expected to create, The missing file's are {diff}"
+    assert not diff, f"There are missing file's in the files you expected to create, The missing file's are {diff}"
     assert os.stat(secrets_ignore_path).st_size > 0
 
 
@@ -836,11 +832,11 @@ def test_integration_init_xsiam_files_content(mocker, monkeypatch, initiator, tm
     """
     # Prepare mockers
     mocker.patch.object(Initiator, "get_remote_templates", return_value=False)
-    # The inputs are: Product, Vendor, Parsing-Rule Version, Modeling-Rule Version, Integration Version,
-    # Ignore secrets
+    # The inputs are: Product, Vendor, Parsing-Rule Version, Modeling-Rule Version, Assets Modeling-Rule version,
+    # Integration Version, Ignore secrets
     monkeypatch.setattr(
         "builtins.input",
-        generate_multiple_inputs(deque(["Product", "Vendor", "", "", "", "Y"])),
+        generate_multiple_inputs(deque(["Product", "Vendor", "", "", "", "", "Y"])),
     )
     temp_pack_dir = Path(tmpdir).joinpath(f"{PACKS_DIR}/{PACK_NAME}")
     temp_pack_dir.mkdir(exist_ok=True, parents=True)
@@ -864,7 +860,6 @@ def test_integration_init_xsiam_files_content(mocker, monkeypatch, initiator, tm
     res = initiator.integration_init()
     expected_files = {
         "command_examples",
-        "test_data",
         "README.md",
         f"{INTEGRATION_NAME}{EVENT_COLLECTOR}.py",
         f"{INTEGRATION_NAME}{EVENT_COLLECTOR}.yml",
@@ -901,10 +896,11 @@ def test_integration_init_xsiam_files_existence(mocker, monkeypatch, initiator, 
     """
     # Prepare mockers
     mocker.patch.object(Initiator, "get_remote_templates", return_value=False)
-    # Product, Vendor, from version parsing, from version modeling, from version yml, ignore secrets
+    # Product, Vendor, from version parsing, from version modeling, from version assets modeling rule,
+    # from version yml, ignore secrets
     monkeypatch.setattr(
         "builtins.input",
-        generate_multiple_inputs(deque(["vendor", "product", "", "", "", "Y"])),
+        generate_multiple_inputs(deque(["vendor", "product", "", "", "", "", "Y"])),
     )
     temp_pack_dir = Path(tmpdir).joinpath(f"{PACKS_DIR}/{PACK_NAME}")
     temp_pack_dir.mkdir(exist_ok=True, parents=True)
@@ -928,7 +924,6 @@ def test_integration_init_xsiam_files_existence(mocker, monkeypatch, initiator, 
     integration_dir_files = set(listdir(integration_path))
     expected_files = {
         "command_examples",
-        "test_data",
         "README.md",
         f"{INTEGRATION_NAME}{EVENT_COLLECTOR}.py",
         f"{INTEGRATION_NAME}{EVENT_COLLECTOR}.yml",
@@ -987,6 +982,55 @@ def test_modeling_rules_init_xsiam_files_existence(
     modeling_rules_dir_files = set(listdir(modeling_rules_path))
     assert modeling_rules_path.is_dir()
     assert expected_files == modeling_rules_dir_files
+
+
+def test_assets_modeling_rules_init_xsiam_files_existence(
+    mocker, monkeypatch, initiator, tmpdir
+):
+    """
+    Tests `assets_modeling_rules_init` function.
+
+    Given
+        - Inputs to init assets modeling rules in a given output.
+
+    When
+        - Running the init assets modeling rules function.
+
+    Then
+        - Ensure the function's return value is True
+        - Ensure assets modeling rules directory with the desired name is created successfully.
+        - Ensure assets modeling rules directory contain all files.
+    """
+    # Prepare mockers
+    mocker.patch.object(Initiator, "get_remote_templates", return_value=False)
+    monkeypatch.setattr("builtins.input", generate_multiple_inputs(deque(["6.0.0"])))
+    assets_modeling_rules_dir = (
+        Path(tmpdir).joinpath(PACK_NAME).joinpath(ASSETS_MODELING_RULES_DIR)
+    )
+    assets_modeling_rules_dir.mkdir(exist_ok=True, parents=True)
+
+    # Prepare initiator
+    initiator.output = str(assets_modeling_rules_dir)
+    initiator.dir_name = INTEGRATION_NAME
+    initiator.category = ANALYTICS_AND_SIEM_CATEGORY
+    initiator.template = "HelloWorldAssetsModelingRules"
+    initiator.marketplace = MarketplaceVersions.MarketplaceV2
+    initiator.is_assets_modeling_rules = True
+
+    assets_modeling_rules_path = assets_modeling_rules_dir.joinpath(
+        f"{INTEGRATION_NAME}{ASSETS_MODELING_RULES_DIR}"
+    )
+    res = initiator.modeling_parsing_rules_init(is_assets_modeling_rules=True)
+    expected_files = {
+        f"{INTEGRATION_NAME}{ASSETS_MODELING_RULES_DIR}_schema.json",
+        f"{INTEGRATION_NAME}{ASSETS_MODELING_RULES_DIR}.yml",
+        f"{INTEGRATION_NAME}{ASSETS_MODELING_RULES_DIR}.xif",
+    }
+
+    assert res
+    assets_modeling_rules_dir_files = set(listdir(assets_modeling_rules_path))
+    assert assets_modeling_rules_path.is_dir()
+    assert expected_files == assets_modeling_rules_dir_files
 
 
 def test_parsing_rules_init_xsiam_files_existence(
@@ -1084,6 +1128,56 @@ def test_modeling_rules_init_file_content_and_name(
     assert "8.3.0" in yaml_content["fromversion"]
     assert f"{INTEGRATION_NAME}_{MODELING_RULE_ID_SUFFIX}" == yaml_content["id"]
     assert f"{INTEGRATION_NAME} Modeling Rule" == yaml_content["name"]
+
+
+def test_assets_modeling_rules_init_file_content_and_name(
+    mocker, monkeypatch, initiator, tmpdir
+):
+    """
+    Tests `modeling_rules_init` function.
+
+    Given
+        - Inputs to init modeling rules in a given output with unsupported version (6.0.0).
+
+    When
+        - Running the init modeling rules function.
+
+    Then
+        - Ensure modeling rules yml contains the correct version.
+        - Ensure that the id and the name are correct.
+    """
+    # Prepare mockers
+    mocker.patch.object(Initiator, "get_remote_templates", return_value=False)
+    monkeypatch.setattr("builtins.input", generate_multiple_inputs(deque(["6.0.0"])))
+
+    temp_pack_dir = Path(tmpdir).joinpath(PACK_NAME)
+    temp_pack_dir.mkdir(exist_ok=True, parents=True)
+
+    assets_modeling_rules_dir = Path(temp_pack_dir).joinpath(ASSETS_MODELING_RULES_DIR)
+    assets_modeling_rules_dir.mkdir(exist_ok=True, parents=True)
+
+    # Prepare initiator
+    initiator.output = str(assets_modeling_rules_dir)
+    initiator.dir_name = INTEGRATION_NAME
+    initiator.category = ANALYTICS_AND_SIEM_CATEGORY
+    initiator.template = "HelloWorldAssetsModelingRules"
+    initiator.marketplace = MarketplaceVersions.MarketplaceV2
+    initiator.is_assets_modeling_rules = True
+
+    modeling_rules_path = Path(assets_modeling_rules_dir).joinpath(
+        f"{INTEGRATION_NAME}{ASSETS_MODELING_RULES_DIR}"
+    )
+    yml_path = Path(modeling_rules_path).joinpath(
+        f"{INTEGRATION_NAME}{ASSETS_MODELING_RULES_DIR}.yml"
+    )
+    res = initiator.modeling_parsing_rules_init(is_assets_modeling_rules=True)
+
+    assert res
+    assert Path(yml_path).exists()
+    yaml_content = get_file(yml_path)
+    assert "8.3.0" in yaml_content["fromversion"]
+    assert f"{INTEGRATION_NAME}_{ASSETS_MODELING_RULE_ID_SUFFIX}" == yaml_content["id"]
+    assert f"{INTEGRATION_NAME} Assets Modeling Rule" == yaml_content["name"]
 
 
 def test_parsing_rules_init_file_content_and_name(

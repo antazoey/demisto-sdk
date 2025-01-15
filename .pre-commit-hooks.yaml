@@ -49,14 +49,6 @@
   types: [python]
   exclude: tests/.*|demisto_sdk/commands/init/templates/.*
 
-- id: update-additional-dependencies
-  name: update-additional-dependencies
-  entry: update-additional-dependencies
-  language: python
-  files: poetry.lock
-  require_serial: true
-  pass_filenames: false
-
 - id: coverage-analyze
   name: coverage-analyze
   entry: demisto-sdk coverage-analyze
@@ -65,9 +57,49 @@
   pass_filenames: false
   args: ["-i", ".coverage"]
 
-- id: merge-coverage-report
-  name: merge-coverage-report
-  entry: merge-coverage-report
+- id: merge-pytest-reports
+  name: merge-pytest-reports
+  entry: merge-pytest-reports
   language: python
   require_serial: true
   pass_filenames: false
+
+- id: validate-deleted-files
+  name: validate-deleted-files
+  entry: validate-deleted-files
+  language: python
+  require_serial: true
+  pass_filenames: false
+
+- id: validate-content-path
+  name: validate-content-path
+  entry: validate-content-path
+  language: python
+  pass_filenames: true
+
+- id: validate-xsoar-config
+  name: validate-xsoar-config
+  entry: validate-xsoar-config
+  language: python
+  pass_filenames: true
+
+- id: validate-file-permission-changes
+  name: validate-file-permission-changes
+  description: Validate that file permissions haven't been changed.
+  entry: validate-file-permission-changes
+  language: python
+  files: ^Packs/
+
+- id: prevent-mypy-global-ignore
+  name: prevent-mypy-global-ignore
+  description: Prevent Python files from setting global mypy ignore
+  entry: prevent-mypy-global-ignore
+  language: python
+  files: .*Packs/.*/(?:Integrations|Scripts)/.*.py$
+
+- id: generate-command-docs
+  name: Generate Documentation for Changed Commands
+  description: Generates documentation for commands when a `_setup.py` file is modified.
+  entry: generate-command-docs
+  language: python
+  files: ^.*_setup\.py$

@@ -151,7 +151,7 @@ class LayoutsContainerValidator(LayoutBaseValidator):
         super().__init__(
             structure_validator,
             oldest_supported_version=LAYOUTS_CONTAINERS_OLDEST_SUPPORTED_VERSION,
-            **kwargs
+            **kwargs,
         )
 
     def is_valid_layout(
@@ -232,7 +232,7 @@ class LayoutsContainerValidator(LayoutBaseValidator):
 
         if not id_set_file:
             logger.info(
-                "[yellow]Skipping mapper incident field validation. Could not read id_set.json.[/yellow]"
+                "<yellow>Skipping mapper incident field validation. Could not read id_set.json.</yellow>"
             )
             return True
 
@@ -374,7 +374,7 @@ class LayoutValidator(LayoutBaseValidator):
 
         if not id_set_file:
             logger.info(
-                "[yellow]Skipping mapper incident field validation. Could not read id_set.json.[/yellow]"
+                "<yellow>Skipping mapper incident field validation. Could not read id_set.json.</yellow>"
             )
             return True
 

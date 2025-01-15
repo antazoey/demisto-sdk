@@ -15,13 +15,14 @@
  `test_build_xsoar_linter_py2_command` of the `command_builder_test.py` file.
 5. Add the check to the `xsoar_linter_integration_test.py` test suit.
 """
+
 import astroid
 from pylint.checkers import BaseChecker
-from pylint.interfaces import IAstroidChecker
+from pylint.typing import MessageDefinitionTuple
 
 # -------------------------------------------- Messages ------------------------------------------------
 
-cert_partner_msg = {
+cert_partner_msg: dict[str, MessageDefinitionTuple] = {
     "E9001": (
         "Sys.exit use is found, Please use return instead.",
         "sys-exit-exists",
@@ -57,7 +58,6 @@ cert_partner_msg = {
 
 
 class CertifiedPartnerChecker(BaseChecker):
-    __implements__ = IAstroidChecker
     name = "certified-partner-checker"
     priority = -1
     msgs = cert_partner_msg

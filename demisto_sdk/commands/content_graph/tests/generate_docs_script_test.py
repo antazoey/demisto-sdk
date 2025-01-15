@@ -23,6 +23,7 @@ from demisto_sdk.commands.content_graph.tests.update_content_graph_test import (
 )
 from demisto_sdk.commands.generate_docs.generate_script_doc import generate_script_doc
 from demisto_sdk.commands.generate_docs.tests.generate_docs_test import handle_example
+from TestSuite.repo import Repo
 
 INPUT_SCRIPT = "SampleScript"
 USES_SCRIPT = "UsesScript"
@@ -32,14 +33,15 @@ USED_BY_PLAYBOOK = "SamplePlaybook"
 
 
 @pytest.fixture(autouse=True)
-def setup_method(mocker, repo):
+def setup_method(mocker, tmp_path_factory, repo: Repo):
     """Auto-used fixture for setup before every test run"""
     import demisto_sdk.commands.content_graph.objects.base_content as bc
 
     bc.CONTENT_PATH = Path(repo.path)
-    mocker.patch.object(neo4j_service, "REPO_PATH", Path(repo.path))
+    mocker.patch.object(
+        neo4j_service, "NEO4J_DIR", new=tmp_path_factory.mktemp("neo4j")
+    )
     mocker.patch.object(ContentGraphInterface, "repo_path", Path(repo.path))
-    neo4j_service.stop()
 
 
 @pytest.fixture
@@ -62,12 +64,7 @@ def repository(mocker, repo) -> ContentDTO:
     repo_pack = repo.create_pack()
     in_script_yml = os.path.join(FILES_PATH, "docs_test", "script-Set.yml")
     script = repo_pack.create_script(name=INPUT_SCRIPT)
-    with open(in_script_yml) as original_yml, open(
-        f"{script.path}/{INPUT_SCRIPT}.yml", "w"
-    ) as new_script_yml:
-        for line in original_yml:
-            new_script_yml.write(line)
-
+    Path(script.path, f"{INPUT_SCRIPT}.yml").write_text(Path(in_script_yml).read_text())
     pack = mock_pack()
     pack.relationships = relationships
     pack.content_items.script.append(
@@ -77,15 +74,15 @@ def repository(mocker, repo) -> ContentDTO:
     pack.content_items.playbook.append(mock_playbook(USED_BY_PLAYBOOK))
     repository.packs.extend([pack])
 
-    def mock__create_content_dto(packs_to_update: List[str]) -> List[ContentDTO]:
+    def mock__create_content_dto(packs_to_update: List[str]) -> ContentDTO:
         if not packs_to_update:
-            return [repository]
+            return repository
         repo_copy = repository.copy()
         repo_copy.packs = [p for p in repo_copy.packs if p.object_id in packs_to_update]
-        return [repo_copy]
+        return repo_copy
 
     mocker.patch(
-        "demisto_sdk.commands.content_graph.content_graph_builder.ContentGraphBuilder._create_content_dtos",
+        "demisto_sdk.commands.content_graph.content_graph_builder.ContentGraphBuilder._create_content_dto",
         side_effect=mock__create_content_dto,
     )
 

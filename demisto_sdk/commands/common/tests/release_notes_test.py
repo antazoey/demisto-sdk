@@ -12,6 +12,10 @@ from demisto_sdk.commands.common.hook_validations.structure import StructureVali
 from demisto_sdk.commands.common.legacy_git_tools import git_path
 from demisto_sdk.commands.common.tools import get_dict_from_file
 from demisto_sdk.commands.update_release_notes.update_rn import UpdateRN
+from demisto_sdk.commands.validate.tools import (
+    extract_rn_headers,
+    filter_rn_headers_prefix,
+)
 from TestSuite.pack import Pack
 
 json = JSON_Handler()
@@ -721,10 +725,10 @@ def test_validate_headers(mocker, repo):
         content, MODIFIED_FILES, pack_name=pack.name, pack_path=pack.path
     )
 
-    pack.create_integration("integration-test")
-    pack.create_script("script-test")
-    pack.create_playbook("playbook-test")
-    pack.create_correlation_rule("correlation-rule-test")
+    pack.create_integration("test")
+    pack.create_script("test")
+    pack.create_playbook("test").create_default_playbook("test")
+    pack.create_correlation_rule("test")
     pack.create_dashboard("test")
     pack.create_incident_field("test1")
     pack.create_incident_field("test2")
@@ -735,8 +739,8 @@ def test_validate_headers(mocker, repo):
     pack.create_mapper("test")
     pack.create_classifier("test")
     pack.create_widget("test")
-    pack.create_xsiam_dashboard("xsiam-dashboard-test")
-    pack.create_trigger("trigger-test")
+    pack.create_xsiam_dashboard("test")
+    pack.create_trigger("test")
     assert validator.validate_release_notes_headers()
 
 
@@ -785,7 +789,7 @@ TEST_RELEASE_NOTES_INVALID_HEADERS = [
     ),
     (
         """#### Incident Fields
-                                  - *test**
+                                  - **test**
                                   - Added x y z""",
         "Incident Fields",
         {
@@ -805,7 +809,7 @@ TEST_RELEASE_NOTES_INVALID_HEADERS = [
         "Content type dose not exist",
         "Invalid special forms",
         "Invalid content type format",
-        "Invalid special forms missing star",
+        "Invalid special forms with stars",
     ],
 )
 def test_invalid_headers(mocker, repo, content, content_type, expected_result):
@@ -822,12 +826,12 @@ def test_invalid_headers(mocker, repo, content, content_type, expected_result):
     validator = get_validator(
         content, MODIFIED_FILES, pack_name=pack.name, pack_path=pack.path
     )
-    headers = validator.extract_rn_headers()
+    headers = extract_rn_headers(validator.latest_release_notes)
     for content_type, content_items in headers.items():
         assert expected_result[
             "rn_valid_header_format"
         ] == validator.rn_valid_header_format(content_type, content_items)
-        validator.filter_rn_headers(headers=headers)
+        filter_rn_headers_prefix(headers=headers)
         assert expected_result[
             "validate_content_type_header"
         ] == validator.validate_content_type_header(content_type=content_type)

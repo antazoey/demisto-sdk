@@ -5,6 +5,7 @@ from typing import Any, Dict, List, Optional
 import networkx
 
 from demisto_sdk.commands.common.constants import MarketplaceVersions
+from demisto_sdk.commands.common.tools import get_value
 from demisto_sdk.commands.common.update_id_set import (
     BUILT_IN_FIELDS,
     build_tasks_graph,
@@ -14,6 +15,7 @@ from demisto_sdk.commands.content_graph.common import ContentType, RelationshipT
 from demisto_sdk.commands.content_graph.parsers.yaml_content_item import (
     YAMLContentItemParser,
 )
+from demisto_sdk.commands.content_graph.strict_objects.playbook import StrictPlaybook
 
 LIST_COMMANDS = ["Builtin|||setList", "Builtin|||getList"]
 IGNORED_FIELDS = [
@@ -52,7 +54,9 @@ class BasePlaybookParser(YAMLContentItemParser, content_type=ContentType.BASE_PL
 
     @cached_property
     def field_mapping(self):
-        super().field_mapping.update({"object_id": "id"})
+        super().field_mapping.update(
+            {"object_id": "id", "tasks": "tasks", "quiet": "quiet"}
+        )
         return super().field_mapping
 
     def is_mandatory_dependency(self, task_id: str) -> bool:
@@ -69,13 +73,24 @@ class BasePlaybookParser(YAMLContentItemParser, content_type=ContentType.BASE_PL
             task (Dict[str, Any]): The task details.
             is_mandatory (bool): Whether or not the dependency is mandatory.
         """
-        if playbook := task.get("task", {}).get("playbookName"):
+        if playbook := (
+            task.get("task", {}).get("playbookName")
+            or task.get("task", {}).get("playbookId")
+        ):
             self.add_relationship(
                 RelationshipType.USES_PLAYBOOK,
                 target=playbook,
                 target_type=ContentType.PLAYBOOK,
                 mandatorily=is_mandatory,
             )
+
+    @property
+    def quiet(self) -> bool:
+        return get_value(self.yml_data, self.field_mapping.get("quiet", ""), False)
+
+    @property
+    def tasks(self) -> Optional[Dict]:
+        return get_value(self.yml_data, self.field_mapping.get("tasks", ""), {})
 
     def handle_script_task(self, task: Dict[str, Any], is_mandatory: bool) -> None:
         """Collects a script dependency.
@@ -98,7 +113,7 @@ class BasePlaybookParser(YAMLContentItemParser, content_type=ContentType.BASE_PL
             if "setIncident" in command:
                 for indicator_field in get_fields_by_script_argument(task):
                     if indicator_field and indicator_field not in IGNORED_FIELDS:
-                        self.add_dependency_by_id(
+                        self.add_dependency_by_cli_name(
                             indicator_field,
                             ContentType.INCIDENT_FIELD,
                             is_mandatory=False,
@@ -107,7 +122,7 @@ class BasePlaybookParser(YAMLContentItemParser, content_type=ContentType.BASE_PL
             elif "setIndicator" in command:
                 for indicator_field in get_fields_by_script_argument(task):
                     if indicator_field and indicator_field not in IGNORED_FIELDS:
-                        self.add_dependency_by_id(
+                        self.add_dependency_by_cli_name(
                             indicator_field,
                             ContentType.INDICATOR_FIELD,
                             is_mandatory=False,
@@ -185,7 +200,7 @@ class BasePlaybookParser(YAMLContentItemParser, content_type=ContentType.BASE_PL
         if field_mapping := task.get("task", {}).get("fieldMapping"):
             for incident_field in field_mapping:
                 if incident_field not in BUILT_IN_FIELDS:
-                    self.add_dependency_by_id(
+                    self.add_dependency_by_cli_name(
                         incident_field, ContentType.INCIDENT_FIELD, is_mandatory
                     )
 
@@ -201,3 +216,7 @@ class BasePlaybookParser(YAMLContentItemParser, content_type=ContentType.BASE_PL
             self.handle_script_task(task, is_mandatory)
             self.handle_command_task(task, is_mandatory)
             self.handle_field_mapping(task, is_mandatory)
+
+    @property
+    def strict_object(self):
+        return StrictPlaybook  # both for Playbooks and TPBs

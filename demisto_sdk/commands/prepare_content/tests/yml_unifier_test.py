@@ -1,16 +1,17 @@
 import base64
 import copy
-import logging
 import os
 import re
 import shutil
 from pathlib import Path
+from tempfile import TemporaryDirectory
+from typing import List
 
 import pytest
 import requests
-from click.testing import CliRunner
+from typer.testing import CliRunner
 
-from demisto_sdk.__main__ import main
+from demisto_sdk.__main__ import app
 from demisto_sdk.commands.common.constants import (
     GOOGLE_CLOUD_STORAGE_PUBLIC_BASE_PATH,
     MarketplaceVersions,
@@ -28,7 +29,7 @@ from demisto_sdk.commands.prepare_content.integration_script_unifier import (
 from demisto_sdk.commands.prepare_content.prepare_upload_manager import (
     PrepareUploadManager,
 )
-from TestSuite.test_tools import ChangeCWD, str_in_call_args_list
+from TestSuite.test_tools import ChangeCWD
 
 TEST_VALID_CODE = """import demistomock as demisto
 from CommonServerPython import *
@@ -223,9 +224,9 @@ This is a desc with an image url link
 """
 
 
-@pytest.mark.parametrize("is_script, res", [(False, True), (True, False)])
+@pytest.mark.parametrize("is_script", [(False, True)])
 def test_insert_description_to_yml_with_markdown_image(
-    is_script, res, mocker, description_as_bytes
+    is_script, mocker, description_as_bytes, monkeypatch
 ):
     """
     Given:
@@ -241,16 +242,18 @@ def test_insert_description_to_yml_with_markdown_image(
         IntegrationScriptUnifier, "get_data", return_value=(description_as_bytes, True)
     )
     package_path = Path("Packs/CybleEventsV2/Integrations/CybleEventsV2")
-    yml_unified, _ = IntegrationScriptUnifier.insert_description_to_yml(
-        package_path,
-        {"commonfields": {"id": "VulnDB"}},
-        is_script,
-        MarketplaceVersions.XSOAR,
-    )
+    with TemporaryDirectory() as dir:
+        monkeypatch.setenv("DEMISTO_SDK_CONTENT_PATH", dir)
+        yml_unified, _ = IntegrationScriptUnifier.insert_description_to_yml(
+            package_path,
+            {"commonfields": {"id": "VulnDB"}},
+            is_script,
+            MarketplaceVersions.XSOAR,
+        )
     assert (
         GOOGLE_CLOUD_STORAGE_PUBLIC_BASE_PATH in yml_unified["detaileddescription"]
-    ) == res
-    assert ("CybleEventsV2" in yml_unified["detaileddescription"]) == res
+    ) is not is_script
+    assert ("CybleEventsV2" in yml_unified["detaileddescription"]) is not is_script
 
 
 def test_insert_description_to_yml_with_no_detailed_desc(tmp_path):
@@ -274,6 +277,70 @@ def test_insert_description_to_yml_with_no_detailed_desc(tmp_path):
     assert (
         "[View Integration Documentation](https://xsoar.pan.dev/docs/reference/integrations/some-integration-id)"
         == yml_unified["detaileddescription"]
+    )
+
+
+@pytest.mark.parametrize(
+    "display_name, support_level, expected_name",
+    (
+        ("Cymulate v2", "partner", "Cymulate v2 (Partner Contribution)"),
+        (
+            "Cymulate v2 (Partner Contribution)",
+            "partner",
+            "Cymulate v2 (Partner Contribution)",
+        ),
+        ("Cymulate v2", "xsoar", "Cymulate v2"),
+        ("Cymulate v2", None, "Cymulate v2"),
+        ("Cymulate v2", "community", "Cymulate v2 (Community Contribution)"),
+        (None, "community", None),
+        ("", "community", ""),
+    ),
+)
+def test_get_display_name(display_name, support_level, expected_name):
+    """
+    Given:
+        - Current display name and pack support level
+
+    When:
+        - Enhancing the integration yml display name to also hold the support level
+
+    Then:
+        - The returned display name holds the expected support level suffix
+    """
+    assert (
+        IntegrationScriptUnifier.get_display_name(display_name, support_level)
+        == expected_name
+    )
+
+
+@pytest.mark.parametrize(
+    "display_name, support_level, expected_name",
+    (
+        ("Cymulate v2 (Partner Contribution)", "partner", "Cymulate v2"),
+        ("Cymulate v2 (Partner Contribution)", "partner", "Cymulate v2"),
+        ("Cymulate v2", "xsoar", "Cymulate v2"),
+        ("Cymulate v2", None, "Cymulate v2"),
+        ("Cymulate v2 (Community Contribution)", "community", "Cymulate v2"),
+        (None, "community", None),
+        ("", "community", ""),
+    ),
+)
+def test_remove_support_from_display_name(display_name, support_level, expected_name):
+    """
+    Given:
+        - Current display name and pack support level
+
+    When:
+        - Removing the support level from the integration display name to hold the
+
+    Then:
+        - The returned display name doesn't hold the support level suffix
+    """
+    assert (
+        IntegrationScriptUnifier.remove_support_from_display_name(
+            display_name, support_level
+        )
+        == expected_name
     )
 
 
@@ -494,33 +561,76 @@ def test_insert_hierarchy_api_module(mocker):
     )
 
 
-def test_insert_pack_version_and_script_to_yml():
+def test_insert_pack_version_and_script_to_yml_js_and_ps1():
     """
     Given:
-     - A pack name.
+     - A pack version.
 
     When:
-     - calling insert_pack_version.
+     - Calling insert_pack_version for different script types (.ps1, .js).
 
     Then:
-     - Ensure the code returned contains the pack version in it.
+     - Ensure the code returned contains the correct pack version.
+     - Ensure the pack version is added only once.
+     - Ensure unsupported script types do not get the pack version added.
     """
-    version_str = "### pack version: 1.0.3"
-    assert version_str not in DUMMY_SCRIPT
-    assert version_str in IntegrationScriptUnifier.insert_pack_version(
-        ".py", DUMMY_SCRIPT, "1.0.3"
+    pack_version = "1.0.3"
+    pack_name = "test"
+
+    # Test for JavaScript script
+    updated_script_js = IntegrationScriptUnifier.insert_pack_version(
+        ".js", DUMMY_SCRIPT, pack_version, pack_name
     )
-    assert version_str in IntegrationScriptUnifier.insert_pack_version(
-        ".ps1", DUMMY_SCRIPT, "1.0.3"
+
+    assert (
+        updated_script_js.count(f"// pack version: {pack_version}") == 1
+    )  # Ensure it is added only once
+
+    # Test for PowerShell script
+    updated_script_ps1 = IntegrationScriptUnifier.insert_pack_version(
+        ".ps1", DUMMY_SCRIPT, pack_version, pack_name
     )
-    assert version_str not in IntegrationScriptUnifier.insert_pack_version(
-        ".js", DUMMY_SCRIPT, "1.0.3"
+    assert (
+        updated_script_ps1.count(f"### pack version: {pack_version}") == 1
+    )  # Ensure it is added only once
+
+
+@pytest.mark.parametrize(
+    "dummy_script, pack_data, expected_version_str",
+    [
+        pytest.param(
+            """
+            def main():
+            """,
+            ["test pack", "1.0.3"],
+            "demisto.debug('pack name = test pack, pack version = 1.0.3')",
+            id="script without version",
+        ),
+        pytest.param(
+            """
+            demisto.debug('pack name = test pack, pack version = 1.0.3')
+            def main():
+            """,
+            ["test pack", "1.0.4"],
+            "demisto.debug('pack name = test pack, pack version = 1.0.4')",
+            id="script with version",
+        ),
+    ],
+)
+def test_insert_pack_version_and_script_to_yml_python_script(
+    dummy_script: str, pack_data: List[str], expected_version_str: str
+):
+    """
+    Test that the pack version is correctly inserted into the Python script.
+    """
+    updated_script = IntegrationScriptUnifier.insert_pack_version(
+        ".py", dummy_script, pack_data[1], pack_data[0]
     )
-    version_str_js = "// pack version: 1.0.3"
-    assert version_str_js not in DUMMY_SCRIPT
-    assert version_str_js in IntegrationScriptUnifier.insert_pack_version(
-        ".js", DUMMY_SCRIPT, "1.0.3"
-    )
+
+    debug_log_with_pack_version_count = updated_script.count(expected_version_str)
+    assert (
+        debug_log_with_pack_version_count == 1
+    ), f"Pack version found {debug_log_with_pack_version_count} times in updated script, expected only once"
 
 
 def get_generated_module_code(import_name, api_module_name):
@@ -731,7 +841,7 @@ class TestMergeScriptPackageToYMLIntegration:
         ),
     )
     def test_unify_integration__hidden_param(
-        self, marketplace: MarketplaceVersions, mocker
+        self, marketplace: MarketplaceVersions, mocker, monkeypatch
     ):
         """
         Given   an integration file with params that have different valid values for the `hidden` attribute
@@ -751,11 +861,14 @@ class TestMergeScriptPackageToYMLIntegration:
         mocker.patch.object(
             IntegrationScript, "get_supported_native_images", return_value=[]
         )
-        unified_yml = PrepareUploadManager.prepare_for_upload(
-            input=Path(self.export_dir_path),
-            output=Path(self.test_dir_path),
-            marketplace=marketplace,
-        )
+        with TemporaryDirectory() as artifact_dir:
+            monkeypatch.setenv("DEMISTO_SDK_CONTENT_PATH", artifact_dir)
+            monkeypatch.setenv("ARTIFACTS_FOLDER", artifact_dir)
+            unified_yml = PrepareUploadManager.prepare_for_upload(
+                input=Path(self.export_dir_path),
+                output=Path(self.test_dir_path),
+                marketplace=marketplace,
+            )
 
         hidden_true = set()
         hidden_false = set()
@@ -821,7 +934,7 @@ class TestMergeScriptPackageToYMLIntegration:
         "marketplace", (MarketplaceVersions.XSOAR, MarketplaceVersions.MarketplaceV2)
     )
     def test_unify_integration__hidden_param_type9(
-        self, marketplace: MarketplaceVersions, mocker
+        self, marketplace: MarketplaceVersions, mocker, monkeypatch
     ):
         """
         Given   an integration file with params that have credentials param of type 9 with valid values
@@ -843,11 +956,14 @@ class TestMergeScriptPackageToYMLIntegration:
         mocker.patch.object(
             IntegrationScript, "get_supported_native_images", return_value=[]
         )
-        unified_yml = PrepareUploadManager.prepare_for_upload(
-            input=Path(self.export_dir_path),
-            output=Path(self.test_dir_path),
-            marketplace=marketplace,
-        )
+        with TemporaryDirectory() as artifact_dir:
+            monkeypatch.setenv("DEMISTO_SDK_CONTENT_PATH", artifact_dir)
+            monkeypatch.setenv("ARTIFACTS_FOLDER", artifact_dir)
+            unified_yml = PrepareUploadManager.prepare_for_upload(
+                input=Path(self.export_dir_path),
+                output=Path(self.test_dir_path),
+                marketplace=marketplace,
+            )
 
         for param in get_yaml(unified_yml)["configuration"]:
             # updates the three sets
@@ -860,7 +976,9 @@ class TestMergeScriptPackageToYMLIntegration:
                     marketplace == MarketplaceVersions.XSOAR
                 )
 
-    def test_unify_integration__detailed_description_with_special_char(self, mocker):
+    def test_unify_integration__detailed_description_with_special_char(
+        self, mocker, monkeypatch
+    ):
         """
         -
         """
@@ -883,9 +1001,12 @@ class TestMergeScriptPackageToYMLIntegration:
         mocker.patch.object(
             IntegrationScript, "get_supported_native_images", return_value=[]
         )
-        export_yml_path = PrepareUploadManager.prepare_for_upload(
-            Path(self.export_dir_path), output=Path(self.test_dir_path)
-        )
+        with TemporaryDirectory() as artifact_dir:
+            monkeypatch.setenv("DEMISTO_SDK_CONTENT_PATH", artifact_dir)
+            monkeypatch.setenv("ARTIFACTS_FOLDER", artifact_dir)
+            export_yml_path = PrepareUploadManager.prepare_for_upload(
+                Path(self.export_dir_path), output=Path(self.test_dir_path)
+            )
 
         assert export_yml_path == Path(self.expected_yml_path)
         actual_yml = get_yaml(export_yml_path)
@@ -898,7 +1019,9 @@ class TestMergeScriptPackageToYMLIntegration:
         assert expected_yml == actual_yml
         assert actual_yml["detaileddescription"] == description
 
-    def test_unify_integration__detailed_description_with_yml_structure(self, mocker):
+    def test_unify_integration__detailed_description_with_yml_structure(
+        self, mocker, monkeypatch
+    ):
         """
         -
         """
@@ -926,9 +1049,12 @@ final test: hi
         mocker.patch.object(
             IntegrationScript, "get_supported_native_images", return_value=[]
         )
-        export_yml_path = PrepareUploadManager.prepare_for_upload(
-            Path(self.export_dir_path), output=Path(self.test_dir_path)
-        )
+        with TemporaryDirectory() as artifact_dir:
+            monkeypatch.setenv("DEMISTO_SDK_CONTENT_PATH", artifact_dir)
+            monkeypatch.setenv("ARTIFACTS_FOLDER", artifact_dir)
+            export_yml_path = PrepareUploadManager.prepare_for_upload(
+                Path(self.export_dir_path), output=Path(self.test_dir_path)
+            )
 
         assert export_yml_path == Path(self.expected_yml_path)
 
@@ -941,7 +1067,7 @@ final test: hi
         assert expected_yml == actual_yml
         assert actual_yml["detaileddescription"] == description
 
-    def test_unify_default_output_integration(self, mocker):
+    def test_unify_default_output_integration(self, mocker, monkeypatch):
         """
         Given
         - UploadTest integration.
@@ -959,9 +1085,12 @@ final test: hi
         mocker.patch.object(
             IntegrationScript, "get_supported_native_images", return_value=[]
         )
-        export_yml_path = PrepareUploadManager.prepare_for_upload(
-            Path(input_path_integration)
-        )
+        with TemporaryDirectory() as artifact_dir:
+            monkeypatch.setenv("DEMISTO_SDK_CONTENT_PATH", artifact_dir)
+            monkeypatch.setenv("ARTIFACTS_FOLDER", artifact_dir)
+            export_yml_path = PrepareUploadManager.prepare_for_upload(
+                Path(input_path_integration)
+            )
         expected_yml_path = (
             TESTS_DIR
             + "/test_files/Packs/DummyPack/Integrations/UploadTest/integration-UploadTest.yml"
@@ -1193,7 +1322,7 @@ PARTNER_DETAILEDDESCRIPTION_NO_URL = (
 )
 
 
-def test_unify_partner_contributed_pack(mocker, monkeypatch, repo):
+def test_unify_partner_contributed_pack(mocker, repo):
     """
     Given
         - Partner contributed pack with email and url in the support details.
@@ -1202,9 +1331,6 @@ def test_unify_partner_contributed_pack(mocker, monkeypatch, repo):
     Then
         - Ensure unify create unified file with partner support notes.
     """
-    mocker.patch.object(logging.getLogger("demisto-sdk"), "info")
-    logger_debug = mocker.patch.object(logging.getLogger("demisto-sdk"), "debug")
-    monkeypatch.setenv("COLUMNS", "1000")
 
     pack = repo.create_pack("PackName")
     integration = pack.create_integration("integration", "bla", INTEGRATION_YAML)
@@ -1231,14 +1357,20 @@ def test_unify_partner_contributed_pack(mocker, monkeypatch, repo):
     )
 
     with ChangeCWD(pack.repo_path):
-        runner = CliRunner(mix_stderr=False)
-        runner.invoke(
-            main,
-            [UNIFY_CMD, "-i", integration.path, "-o", integration.path],
-            catch_exceptions=True,
+        result = CliRunner(mix_stderr=False).invoke(
+            app,
+            [
+                UNIFY_CMD,
+                "-i",
+                integration.path,
+                "-o",
+                integration.path,
+                "--console-log-threshold",
+                "DEBUG",
+            ],
         )
     # Verifying unified process
-    assert str_in_call_args_list(logger_debug.call_args_list, "Created unified yml:")
+    assert "Created unified yml:" in result.output
 
     # Verifying the unified file data
     assert PARTNER_UNIFY["display"] == PARTNER_DISPLAY_NAME
@@ -1247,7 +1379,7 @@ def test_unify_partner_contributed_pack(mocker, monkeypatch, repo):
     assert "URL" in PARTNER_UNIFY["detaileddescription"]
 
 
-def test_unify_partner_contributed_pack_no_email(mocker, monkeypatch, repo):
+def test_unify_partner_contributed_pack_no_email(mocker, repo):
     """
     Given
         - Partner contributed pack with url and without email in the support details.
@@ -1256,10 +1388,6 @@ def test_unify_partner_contributed_pack_no_email(mocker, monkeypatch, repo):
     Then
         - Ensure unify create unified file with partner support notes.
     """
-    mocker.patch.object(logging.getLogger("demisto-sdk"), "info")
-    logger_debug = mocker.patch.object(logging.getLogger("demisto-sdk"), "debug")
-    monkeypatch.setenv("COLUMNS", "1000")
-
     pack = repo.create_pack("PackName")
     integration = pack.create_integration("integration", "bla", INTEGRATION_YAML)
     pack.pack_metadata.write_json(PACK_METADATA_PARTNER_NO_EMAIL)
@@ -1286,13 +1414,21 @@ def test_unify_partner_contributed_pack_no_email(mocker, monkeypatch, repo):
 
     with ChangeCWD(pack.repo_path):
         runner = CliRunner(mix_stderr=False)
-        runner.invoke(
-            main,
-            [UNIFY_CMD, "-i", integration.path, "-o", integration.path],
+        result = runner.invoke(
+            app,
+            [
+                UNIFY_CMD,
+                "-i",
+                integration.path,
+                "-o",
+                integration.path,
+                "--console-log-threshold",
+                "DEBUG",
+            ],
             catch_exceptions=True,
         )
     # Verifying unified process
-    assert str_in_call_args_list(logger_debug.call_args_list, "Created unified yml:")
+    assert "Created unified yml:" in result.output
 
     # Verifying the unified file data
     assert PARTNER_UNIFY_NO_EMAIL["display"] == PARTNER_DISPLAY_NAME
@@ -1334,9 +1470,8 @@ def test_unify_contributor_emails_list(mocker, repo, pack_metadata):
     )
 
     with ChangeCWD(pack.repo_path):
-        runner = CliRunner(mix_stderr=False)
-        runner.invoke(
-            main,
+        CliRunner(mix_stderr=False).invoke(
+            app,
             [UNIFY_CMD, "-i", integration.path, "-o", integration.path],
             catch_exceptions=True,
         )
@@ -1351,7 +1486,7 @@ def test_unify_contributor_emails_list(mocker, repo, pack_metadata):
     )
 
 
-def test_unify_partner_contributed_pack_no_url(mocker, monkeypatch, repo):
+def test_unify_partner_contributed_pack_no_url(mocker, repo):
     """
     Given
         - Partner contributed pack with email and without url in the support details
@@ -1360,9 +1495,6 @@ def test_unify_partner_contributed_pack_no_url(mocker, monkeypatch, repo):
     Then
         - Ensure unify create unified file with partner support notes.
     """
-    mocker.patch.object(logging.getLogger("demisto-sdk"), "info")
-    logger_debug = mocker.patch.object(logging.getLogger("demisto-sdk"), "debug")
-    monkeypatch.setenv("COLUMNS", "1000")
 
     pack = repo.create_pack("PackName")
     integration = pack.create_integration("integration", "bla", INTEGRATION_YAML)
@@ -1389,14 +1521,21 @@ def test_unify_partner_contributed_pack_no_url(mocker, monkeypatch, repo):
     )
 
     with ChangeCWD(pack.repo_path):
-        runner = CliRunner(mix_stderr=False)
-        runner.invoke(
-            main,
-            [UNIFY_CMD, "-i", integration.path, "-o", integration.path],
+        result = CliRunner(mix_stderr=False).invoke(
+            app,
+            [
+                UNIFY_CMD,
+                "-i",
+                integration.path,
+                "-o",
+                integration.path,
+                "--console-log-threshold",
+                "DEBUG",
+            ],
             catch_exceptions=True,
         )
     # Verifying unified process
-    assert str_in_call_args_list(logger_debug.call_args_list, "Created unified yml:")
+    assert "Created unified yml:" in result.output
 
     # Verifying the unified file data
     assert PARTNER_UNIFY_NO_URL["display"] == PARTNER_DISPLAY_NAME
@@ -1405,7 +1544,7 @@ def test_unify_partner_contributed_pack_no_url(mocker, monkeypatch, repo):
     assert "URL" not in PARTNER_UNIFY_NO_URL["detaileddescription"]
 
 
-def test_unify_not_partner_contributed_pack(mocker, monkeypatch, repo):
+def test_unify_not_partner_contributed_pack(mocker, repo):
     """
     Given
         - XSOAR supported - not a partner contribution
@@ -1414,10 +1553,6 @@ def test_unify_not_partner_contributed_pack(mocker, monkeypatch, repo):
     Then
         - Ensure unify create unified file without partner support notes.
     """
-    mocker.patch.object(logging.getLogger("demisto-sdk"), "info")
-    logger_debug = mocker.patch.object(logging.getLogger("demisto-sdk"), "debug")
-    monkeypatch.setenv("COLUMNS", "1000")
-
     pack = repo.create_pack("PackName")
     integration = pack.create_integration("integration", "bla", INTEGRATION_YAML)
     pack.pack_metadata.write_json(PACK_METADATA_XSOAR)
@@ -1439,21 +1574,28 @@ def test_unify_not_partner_contributed_pack(mocker, monkeypatch, repo):
     )
 
     with ChangeCWD(pack.repo_path):
-        runner = CliRunner(mix_stderr=False)
-        runner.invoke(
-            main,
-            [UNIFY_CMD, "-i", integration.path, "-o", integration.path],
+        result = CliRunner(mix_stderr=False).invoke(
+            app,
+            [
+                UNIFY_CMD,
+                "-i",
+                integration.path,
+                "-o",
+                integration.path,
+                "--console-log-threshold",
+                "DEBUG",
+            ],
             catch_exceptions=True,
         )
     # Verifying unified process
-    assert str_in_call_args_list(logger_debug.call_args_list, "Created unified yml:")
+    assert "Created unified yml:" in result.output
 
     # Verifying the unified file data
     assert "Partner" not in XSOAR_UNIFY["display"]
     assert "partner" not in XSOAR_UNIFY["detaileddescription"]
 
 
-def test_unify_community_contributed(mocker, monkeypatch, repo):
+def test_unify_community_contributed(mocker, repo):
     """
     Given
         - Community contribution.
@@ -1462,9 +1604,6 @@ def test_unify_community_contributed(mocker, monkeypatch, repo):
     Then
         - Ensure unify create unified file with community detailed description.
     """
-    mocker.patch.object(logging.getLogger("demisto-sdk"), "info")
-    logger_debug = mocker.patch.object(logging.getLogger("demisto-sdk"), "debug")
-    monkeypatch.setenv("COLUMNS", "1000")
 
     pack = repo.create_pack("PackName")
     integration = pack.create_integration("integration", "bla", INTEGRATION_YAML)
@@ -1491,14 +1630,21 @@ def test_unify_community_contributed(mocker, monkeypatch, repo):
     )
 
     with ChangeCWD(pack.repo_path):
-        runner = CliRunner(mix_stderr=False)
-        runner.invoke(
-            main,
-            [UNIFY_CMD, "-i", integration.path, "-o", integration.path],
+        result = CliRunner(mix_stderr=False).invoke(
+            app,
+            [
+                UNIFY_CMD,
+                "-i",
+                integration.path,
+                "-o",
+                integration.path,
+                "--console-log-threshold",
+                "DEBUG",
+            ],
             catch_exceptions=True,
         )
     # Verifying unified process
-    assert str_in_call_args_list(logger_debug.call_args_list, "Created unified yml:")
+    assert "Created unified yml:" in result.output
 
     # Verifying the unified file data
     assert COMMUNITY_UNIFY["display"] == COMMUNITY_DISPLAY_NAME
@@ -1551,9 +1697,9 @@ def test_add_custom_section(tmp_path):
         "name": "Integration name",
     }
     unified = IntegrationScriptUnifier.add_custom_section(unified_yml, "Test", False)
-    assert unified.get("display") == "Integration display - Test"
-    assert unified.get("name") == "Integration name - Test"
-    assert unified.get("commonfields").get("id") == "Integration id - Test"
+    assert unified["display"] == "Integration display - Test"
+    assert unified["name"] == "Integration name - Test"
+    assert unified["commonfields"]["id"] == "Integration id - Test"
 
 
 def test_empty_yml(tmp_path):

@@ -4,6 +4,7 @@ import base64
 import os
 import re
 import shutil
+from copy import deepcopy
 from pathlib import Path
 from typing import Optional
 
@@ -129,13 +130,13 @@ class YmlSplitter:
         yaml_out = f"{output_path}/{base_name}.yml"
         logger.debug(f"Creating yml file: {yaml_out} ...")
         if self.yml_data:
-            yaml_obj = self.yml_data
+            yaml_obj = deepcopy(self.yml_data)
         else:
             yaml_obj = get_file(self.input, raise_on_error=True)
 
         script_obj = yaml_obj
 
-        if self.file_type in ("modelingrule", "parsingrule"):
+        if self.file_type in ("modelingrule", "parsingrule", "assetsmodelingrule"):
             self.extract_rules(f"{output_path}/{base_name}.xif")
             if "rules" in yaml_obj:
                 yaml_obj["rules"] = PlainScalarString("")
@@ -196,7 +197,11 @@ class YmlSplitter:
             common_server = "CommonServerPython" not in str(
                 self.input
             ) and "CommonServerPowerShell" not in str(self.input)
-        if self.file_type == "modelingrule" or self.file_type == "parsingrule":
+        if (
+            self.file_type == "modelingrule"
+            or self.file_type == "parsingrule"
+            or self.file_type == "assetsmodelingrule"
+        ):
             # no need to extract code
             return 0
 

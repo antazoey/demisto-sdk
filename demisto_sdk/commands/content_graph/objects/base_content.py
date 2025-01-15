@@ -1,6 +1,7 @@
+import inspect
 from abc import ABC
 from collections import defaultdict
-from functools import lru_cache
+from functools import cached_property, lru_cache
 from pathlib import Path
 from typing import (
     TYPE_CHECKING,
@@ -10,6 +11,7 @@ from typing import (
     List,
     Optional,
     Set,
+    Tuple,
     Type,
     cast,
 )
@@ -19,7 +21,6 @@ from packaging.version import Version
 from pydantic import BaseModel, DirectoryPath, Field
 from pydantic.main import ModelMetaclass
 
-import demisto_sdk.commands.content_graph.parsers.content_item
 from demisto_sdk.commands.common.constants import (
     MARKETPLACE_MIN_VERSION,
     PACKS_FOLDER,
@@ -36,12 +37,16 @@ from demisto_sdk.commands.content_graph.common import (
     LazyProperty,
     RelationshipType,
 )
+from demisto_sdk.commands.content_graph.parsers import content_item
 from demisto_sdk.commands.content_graph.parsers.content_item import (
     ContentItemParser,
     InvalidContentItemException,
     NotAContentItemException,
 )
 from demisto_sdk.commands.content_graph.parsers.pack import PackParser
+from demisto_sdk.commands.content_graph.strict_objects.base_strict_model import (
+    StructureError,
+)
 
 if TYPE_CHECKING:
     from demisto_sdk.commands.content_graph.objects.relationship import RelationshipData
@@ -86,6 +91,7 @@ class BaseContentMetaclass(ModelMetaclass):
             if isinstance(getattr(super_cls, attr), LazyProperty)
         }:
             model_cls._lazy_properties = lazy_properties  # type: ignore[attr-defined]
+
         return model_cls
 
 
@@ -107,6 +113,7 @@ class BaseNode(ABC, BaseModel, metaclass=BaseContentMetaclass):
         )
         orm_mode = True  # allows using from_orm() method
         allow_population_by_field_name = True  # when loading from orm, ignores the aliases and uses the property name
+        keep_untouched = (cached_property,)
 
     def __getstate__(self):
         """Needed to for the object to be pickled correctly (to use multiprocessing)"""
@@ -157,11 +164,26 @@ class BaseNode(ABC, BaseModel, metaclass=BaseContentMetaclass):
         Returns:
             Dict[str, Any]: JSON dictionary representation of the class.
         """
-        self.__add_lazy_properties()
 
-        json_dct = json.loads(self.json(exclude={"commands", "database_id"}))
+        self.__add_lazy_properties()
+        cached_properties = {
+            name
+            for name, value in inspect.getmembers(self.__class__)
+            if isinstance(value, cached_property)
+        }
+        json_dct = json.loads(
+            self.json(
+                exclude={
+                    "commands",
+                    "database_id",
+                }
+                | cached_properties
+            )
+        )
         if "path" in json_dct and Path(json_dct["path"]).is_absolute():
-            json_dct["path"] = (Path(json_dct["path"]).relative_to(CONTENT_PATH)).as_posix()  # type: ignore
+            json_dct["path"] = (
+                Path(json_dct["path"]).relative_to(CONTENT_PATH)
+            ).as_posix()  # type: ignore
         json_dct["content_type"] = self.content_type
         return json_dct
 
@@ -178,12 +200,32 @@ class BaseContent(BaseNode):
     field_mapping: dict = Field({}, exclude=True)
     path: Path
     git_status: Optional[GitStatuses]
+    git_sha: Optional[str]
     old_base_content_object: Optional["BaseContent"] = None
+    related_content_dict: dict = Field({}, exclude=True)
+    structure_errors: List[StructureError] = Field(default_factory=list, exclude=True)
 
-    def _save(self, path: Path, data: dict):
+    def _save(
+        self,
+        path: Path,
+        data: dict,
+        predefined_keys_to_keep: Optional[Tuple[str, ...]] = None,
+        fields_to_exclude: List[str] = [],
+    ):
+        """Save the class vars into the dict data.
+
+        Args:
+            path (Path): The path of the file to save the new data into.
+            data (dict): the data dict.
+            predefined_keys_to_keep (Optional[Tuple[str]], optional): keys to keep even if they're not defined.
+        """
         for key, val in self.field_mapping.items():
             attr = getattr(self, key)
-            if key == "marketplaces":
+            if key == "docker_image":
+                attr = str(attr)
+            elif key in fields_to_exclude:
+                continue
+            elif key == "marketplaces":
                 if (
                     MarketplaceVersions.XSOAR_SAAS in attr
                     and MarketplaceVersions.XSOAR in attr
@@ -194,7 +236,7 @@ class BaseContent(BaseNode):
                     and MarketplaceVersions.XSOAR in attr
                 ):
                     attr.remove(MarketplaceVersions.XSOAR_ON_PREM)
-            if attr:
+            if attr or (predefined_keys_to_keep and val in predefined_keys_to_keep):
                 set_value(data, val, attr)
         write_dict(path, data, indent=4)
 
@@ -205,11 +247,18 @@ class BaseContent(BaseNode):
         raise NotImplementedError
 
     @property
-    def ignored_errors(self) -> list:
+    def ignored_errors(self) -> List[str]:
         raise NotImplementedError
 
-    @property
-    def support_level(self) -> str:
+    def ignored_errors_related_files(self, file_path: Path) -> List[str]:
+        """Return the errors that should be ignored for the given related file path.
+
+        Args:
+            file_path (str): The path of the file we want to get list of ignored errors for.
+
+        Returns:
+            list: The list of the ignored error codes.
+        """
         raise NotImplementedError
 
     def dump(
@@ -233,19 +282,12 @@ class BaseContent(BaseNode):
     @lru_cache
     def from_path(
         path: Path,
-        git_status: Optional[GitStatuses] = None,
-        old_file_path: Optional[Path] = None,
         git_sha: Optional[str] = None,
+        raise_on_exception: bool = False,
+        metadata_only: bool = False,
     ) -> Optional["BaseContent"]:
-        logger.debug(f"Loading content item from path: {path}")
-        # if the file was added or renamed - add a pointer to the object created from the old file content / path.
-        if git_status in (GitStatuses.MODIFIED, GitStatuses.RENAMED):
-            obj = BaseContent.from_path(path, git_status)
-            if obj:
-                path = path if not old_file_path else old_file_path
-                old_obj = BaseContent.from_path(path, git_sha=git_sha)
-                obj.old_base_content_object = old_obj
-            return obj
+        logger.debug(f"Loading content item from {path}")
+
         if (
             path.is_dir()
             and path.parent.name == PACKS_FOLDER
@@ -253,49 +295,42 @@ class BaseContent(BaseNode):
         ):  # if the path given is a pack
             try:
                 return CONTENT_TYPE_TO_MODEL[ContentType.PACK].from_orm(
-                    PackParser(path, git_sha=git_sha)
+                    PackParser(path, git_sha=git_sha, metadata_only=metadata_only)
                 )
             except InvalidContentItemException:
-                logger.error(f"Could not parse content from {str(path)}")
+                logger.error(f"Could not parse content from {path}")
                 return None
         try:
+            content_item.MARKETPLACE_MIN_VERSION = "0.0.0"
             content_item_parser = ContentItemParser.from_path(path, git_sha=git_sha)
-        except NotAContentItemException:
-            # This is a workaround because `create-content-artifacts` still creates deprecated content items
-            demisto_sdk.commands.content_graph.parsers.content_item.MARKETPLACE_MIN_VERSION = (
-                "0.0.0"
-            )
-            try:
-                content_item_parser = ContentItemParser.from_path(path, git_sha=git_sha)
-            except NotAContentItemException:
-                logger.error(
-                    f"Invalid content path provided: {str(path)}. Please provide a valid content item or pack path."
-                )
-                return None
-            demisto_sdk.commands.content_graph.parsers.content_item.MARKETPLACE_MIN_VERSION = (
-                MARKETPLACE_MIN_VERSION
-            )
-        except InvalidContentItemException:
+            content_item.MARKETPLACE_MIN_VERSION = MARKETPLACE_MIN_VERSION
+
+        except (NotAContentItemException, InvalidContentItemException) as e:
+            if raise_on_exception:
+                raise
             logger.error(
-                f"Invalid content path provided: {str(path)}. Please provide a valid content item or pack path."
+                f"Invalid content path provided: {path}. Please provide a valid content item or pack path. ({type(e).__name__})"
             )
             return None
 
         model = CONTENT_TYPE_TO_MODEL.get(content_item_parser.content_type)
-        logger.debug(f"Loading content item from path: {path} as {model}")
-        if not model:
-            logger.error(f"Could not parse content item from path: {path}")
+        if model:
+            logger.debug(f"Detected model {model} for {path.name}")
+        else:
+            logger.error(f"Could not parse content item from {path.name}")
             return None
+
         try:
-            obj = model.from_orm(content_item_parser)  # type: ignore
-            if obj:
-                obj.git_status = git_status
-            return obj
-        except Exception as e:
-            logger.error(
-                f"Could not parse content item from path: {path}: {e}. Parser class: {content_item_parser}"
+            return model.from_orm(content_item_parser)  # type: ignore
+        except Exception:
+            logger.exception(
+                f"Could not parse content item from path {path} using {content_item_parser}"
             )
             return None
+
+    @staticmethod
+    def match(_dict: dict, path: Path) -> bool:
+        pass
 
 
 class UnknownContent(BaseNode):
@@ -306,8 +341,7 @@ class UnknownContent(BaseNode):
     object_id: str = ""
     name: str = ""
 
-    def dump(self, _, __):
-        ...
+    def dump(self, _, __): ...
 
     @property
     def identifier(self):

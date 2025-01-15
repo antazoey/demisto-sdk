@@ -1,5 +1,6 @@
 from typing import Dict, List, Tuple
 
+from more_itertools import first
 from neo4j import Transaction, graph
 
 from demisto_sdk.commands.common.constants import (
@@ -20,35 +21,18 @@ from demisto_sdk.commands.content_graph.interface.neo4j.queries.common import (
 )
 
 
-def validate_unknown_content(
-    tx: Transaction,
-    file_paths: List[str],
-    raises_error: bool,
-    include_optional: bool = False,
-):
+def validate_unknown_content(tx: Transaction, file_paths: List[str]):
     """Query graph to return all ids used in the provided files that are missing from the repo.
 
     Args:
         tx: The Transaction to contact the graph with.
         file_paths: The file paths to check
-        raises_error: If True with include_optional=False, will only return the mandatory dependencies.
-                      If False with include_optional=False, will only return the non-mandatory dependencies.
-        include_optional: If True, will return both mandatory and non-mandatory dependencies.
-
     Return:
         All content ids used in the provided file paths that are missing from the repo.
     """
-    if include_optional:
-        query = f"""// Returns USES relationships to content items not in the repository
+    query = f"""// Returns USES relationships to content items not in the repository
         MATCH (content_item_from{{deprecated: false}})-[r:{RelationshipType.USES}]->(n{{not_in_repository: true}})
-        WHERE NOT (content_item_from.is_test) {f'AND content_item_from.path in {file_paths}' if file_paths else ''}
-        RETURN content_item_from, collect(r) as relationships, collect(n) as nodes_to
-        """
-    else:
-        query = f"""// Returns USES relationships to content items not in the repository
-        MATCH (content_item_from{{deprecated: false}})-[r:{RelationshipType.USES}]->(n{{not_in_repository: true}})
-        WHERE{' NOT' if raises_error else ''} (content_item_from.is_test OR NOT r.mandatorily)
-        {f'AND content_item_from.path in {file_paths}' if file_paths else ''}
+        {f'WHERE content_item_from.path in {file_paths}' if file_paths else ''}
         RETURN content_item_from, collect(r) as relationships, collect(n) as nodes_to
         """
     return {
@@ -66,7 +50,7 @@ def validate_fromversion(
 ):
     op = ">=" if for_supported_versions else "<"
     query = f"""// Returning all the USES relationships with where the target's fromversion is higher than the source's
-MATCH (content_item_from{{deprecated: false}})-[r:{RelationshipType.USES}{{mandatorily:true}}]->(n)
+MATCH (content_item_from{{deprecated: false, is_test: false}})-[r:{RelationshipType.USES}{{mandatorily:true}}]->(n)
 WHERE {versioned('content_item_from.fromversion')} < {versioned('n.fromversion')}
 AND {versioned('n.fromversion')} {op} {versioned(GENERAL_DEFAULT_FROMVERSION)}
 AND n.fromversion <> "{DEFAULT_CONTENT_ITEM_FROM_VERSION}"  // skips types with no "fromversion"
@@ -124,16 +108,19 @@ RETURN content_item_from, collect(r) as relationships, collect(n) as nodes_to"""
     }
 
 
-def get_items_using_deprecated(tx: Transaction, file_paths: List[str]):
+def get_items_using_deprecated(
+    tx: Transaction, file_paths: List[str]
+) -> List[Tuple[str, List[graph.Node]]]:
     return get_items_using_deprecated_commands(
         tx, file_paths
     ) + get_items_using_deprecated_content_items(tx, file_paths)
 
 
-def get_items_using_deprecated_commands(tx: Transaction, file_paths: List[str]):
-    files_filter = (
-        f"AND (p.path in {file_paths} OR i.path IN {file_paths})" if file_paths else ""
-    )
+def get_items_using_deprecated_commands(
+    tx: Transaction, file_paths: List[str]
+) -> List[Tuple[str, List[graph.Node]]]:
+    files_filter = f"AND p.path IN {file_paths}" if file_paths else ""
+
     command_query = f"""// Returning all the items which using deprecated commands
 MATCH (p{{deprecated: false}})-[:USES]->(c:Command)<-[:HAS_COMMAND{{deprecated: true}}]-(i:Integration) WHERE NOT p.is_test
 OPTIONAL MATCH (i2:Integration)-[:HAS_COMMAND{{deprecated: false}}]->(c)
@@ -141,14 +128,21 @@ WHERE elementId(i) <> elementId(i2)
 WITH p, c, i2
 WHERE i2 IS NULL
 {files_filter}
-RETURN c.object_id AS deprecated_command, c.content_type AS deprecated_content_type, collect(p.path) AS object_using_deprecated"""
-    return list(run_query(tx, command_query))
+RETURN c.object_id AS deprecated_command, collect(p) AS object_using_deprecated"""
+    return [
+        (
+            item.get("deprecated_command"),
+            item.get("object_using_deprecated"),
+        )
+        for item in run_query(tx, command_query)
+    ]
 
 
-def get_items_using_deprecated_content_items(tx: Transaction, file_paths: List[str]):
-    files_filter = (
-        f"AND (p.path IN {file_paths} OR d.path IN {file_paths})" if file_paths else ""
-    )
+def get_items_using_deprecated_content_items(
+    tx: Transaction, file_paths: List[str]
+) -> List[Tuple[str, List[graph.Node]]]:
+    files_filter = f"AND p.path IN {file_paths}" if file_paths else ""
+
     query = f"""
     MATCH (p{{deprecated: false}})-[:USES]->(d{{deprecated: true}}) WHERE not p.is_test
 // be sure the USES relationship is not because a command, as commands has dedicated query
@@ -156,9 +150,15 @@ OPTIONAL MATCH (p)-[:USES]->(c1:Command)<-[:HAS_COMMAND]-(d)
 WITH p, d, c1
 WHERE c1 IS NULL
 {files_filter}
-RETURN d.object_id AS deprecated_content, d.content_type AS deprecated_content_type, collect(p.path) AS object_using_deprecated
+RETURN d.object_id AS deprecated_content, collect(p) AS object_using_deprecated
     """
-    return list(run_query(tx, query))
+    return [
+        (
+            item.get("deprecated_content"),
+            item.get("object_using_deprecated"),
+        )
+        for item in run_query(tx, query)
+    ]
 
 
 def validate_marketplaces(tx: Transaction, pack_ids: List[str]):
@@ -167,13 +167,15 @@ MATCH
 (p1)<-[:{RelationshipType.IN_PACK}]-(content_item_from{{deprecated: false}})
     -[r:{RelationshipType.USES}{{mandatorily:true}}]->
         (n)-[:{RelationshipType.IN_PACK}]->(p2)
-WHERE not all(elem IN content_item_from.marketplaces WHERE elem IN n.marketplaces)
+WHERE not content_item_from.is_test
+AND not all(elem IN content_item_from.marketplaces WHERE elem IN n.marketplaces)
 """
     if pack_ids:
         query += f"AND (p1.object_id in {pack_ids} OR p2.object_id in {pack_ids})"
     query += f"""
 OPTIONAL MATCH (n2{{object_id: n.object_id, content_type: n.content_type}})
-WHERE elementId(n) <> elementId(n2)
+WHERE not content_item_from.is_test
+AND elementId(n) <> elementId(n2)
 AND all(elem IN content_item_from.marketplaces WHERE elem IN n2.marketplaces)
 
 WITH content_item_from, r, n, n2
@@ -267,21 +269,34 @@ def validate_core_packs_dependencies(
     }
 
 
-def validate_hidden_pack_dependencies(
+def validate_packs_with_hidden_mandatory_dependencies(
     tx: Transaction,
     pack_ids: List[str],
-):
-    query = f"""// Returns DEPENDS_ON relationships to packs which are hidden
-MATCH (pack1)-[r:{RelationshipType.DEPENDS_ON}{{mandatorily:true}}]->(pack2{{hidden: true}})
-WHERE {f'(pack1.object_id in {pack_ids} OR pack2.object_id in {pack_ids}) AND' if pack_ids else ""}
-NOT r.is_test
-and NOT pack1.hidden
-and NOT pack1.deprecated
-RETURN pack1, collect(r) as relationships, collect(pack2) as nodes_to
-        """
+) -> Dict[str, Neo4jRelationshipResult]:
+    """
+    Identifies non-hidden packs that have mandatory dependencies on hidden packs.
+    Excludes test relationships and deprecated packs.
+    Args:
+        tx (Transaction): The Neo4j transaction object.
+        pack_ids (List[str]): List of pack IDs to check.
+
+    Returns:
+        Dict[str, Neo4jRelationshipResult]: Dictionary of packs with hidden dependencies.
+    """
+    pack_filter = (
+        f" AND (pack.object_id in {pack_ids} OR hidden_pack.object_id in {pack_ids})"
+        if pack_ids
+        else ""
+    )
+    query = f"""
+    // Returns DEPENDS_ON relationships to packs which are hidden
+    MATCH (pack:Pack {{hidden:FALSE}})-[r:{RelationshipType.DEPENDS_ON}{{mandatorily:TRUE}}]->(hidden_pack:Pack {{hidden: TRUE}})
+    WHERE NOT r.is_test {pack_filter}
+    RETURN pack, collect(r) as relationships, collect(hidden_pack) as nodes_to
+    """
     return {
-        item.get("pack1").element_id: Neo4jRelationshipResult(
-            node_from=item.get("pack1"),
+        item.get("pack").element_id: Neo4jRelationshipResult(
+            node_from=item.get("pack"),
             relationships=item.get("relationships"),
             nodes_to=item.get("nodes_to"),
         )
@@ -306,3 +321,27 @@ def validate_duplicate_ids(
         (item.get("content_item"), item.get("duplicate_content_items"))
         for item in run_query(tx, query)
     ]
+
+
+def validate_test_playbook_in_use(
+    tx: Transaction, test_playbook_ids: List[str], test_playbooks_ids_to_skip
+) -> List[graph.Node]:
+    query = """
+MATCH (tp:TestPlaybook) WHERE
+"""
+    if test_playbook_ids:
+        query += f" tp.object_id IN {test_playbook_ids} AND"
+    query += f"""
+ NOT EXISTS {{ MATCH ()-[:TESTED_BY]->(tp) }}
+AND tp.deprecated = false
+AND NOT (tp.object_id IN {test_playbooks_ids_to_skip})
+MATCH (tp)-[:IN_PACK]->(p:Pack)
+WHERE p.support = "xsoar"
+AND p.deprecated = false
+RETURN collect(tp) AS content_items
+"""
+    # when there a test playbooks that not in use, the query return a list with one item
+    return first(
+        filter(None, (item.get("content_items") for item in run_query(tx, query))),
+        default=[],
+    )

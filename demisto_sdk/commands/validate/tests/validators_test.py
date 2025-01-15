@@ -1,39 +1,67 @@
-import logging
+import os
 import tempfile
 from pathlib import Path
+from typing import Dict, List, Optional, Set
 from unittest.mock import patch
 
 import pytest
 import toml
+from more_itertools import map_reduce
+from pytest_mock import MockerFixture
 
+from demisto_sdk.commands.common.constants import (
+    INTEGRATIONS_DIR,
+    ExecutionMode,
+    GitStatuses,
+)
 from demisto_sdk.commands.common.content_constant_paths import CONTENT_PATH
+from demisto_sdk.commands.common.git_util import GitUtil
 from demisto_sdk.commands.common.handlers import DEFAULT_JSON_HANDLER as json
+from demisto_sdk.commands.content_graph.common import ContentType
+from demisto_sdk.commands.content_graph.objects.base_content import BaseContent
+from demisto_sdk.commands.content_graph.objects.integration import Integration
+from demisto_sdk.commands.content_graph.objects.script import Script
+from demisto_sdk.commands.content_graph.tests.test_tools import load_yaml
 from demisto_sdk.commands.validate.config_reader import (
     ConfigReader,
     ConfiguredValidations,
 )
 from demisto_sdk.commands.validate.initializer import Initializer
-from demisto_sdk.commands.validate.tests.test_tools import create_integration_object
+from demisto_sdk.commands.validate.tests.test_tools import (
+    create_integration_object,
+    create_pack_object,
+    create_script_object,
+)
 from demisto_sdk.commands.validate.validate_manager import ValidateManager
 from demisto_sdk.commands.validate.validation_results import ResultWriter
+from demisto_sdk.commands.validate.validators.BA_validators.BA101_id_should_equal_name import (
+    IDNameValidator,
+)
 from demisto_sdk.commands.validate.validators.BA_validators.BA101_id_should_equal_name_all_statuses import (
     IDNameAllStatusesValidator,
 )
 from demisto_sdk.commands.validate.validators.base_validator import (
+    VALIDATION_CATEGORIES,
     BaseValidator,
     FixResult,
     ValidationResult,
+    get_all_validators,
 )
 from demisto_sdk.commands.validate.validators.BC_validators.BC100_breaking_backwards_subtype import (
     BreakingBackwardsSubtypeValidator,
 )
+from demisto_sdk.commands.validate.validators.DO_validators.DO106_docker_image_is_latest_tag import (
+    DockerImageTagIsNotOutdated,
+)
+from demisto_sdk.commands.validate.validators.GR_validators.GR100_uses_items_not_in_market_place_all_files import (
+    MarketplacesFieldValidatorAllFiles,
+)
 from demisto_sdk.commands.validate.validators.PA_validators.PA108_pack_metadata_name_not_valid import (
     PackMetadataNameValidator,
 )
-from demisto_sdk.commands.validate.validators.super_classes.BA101_id_should_equal_name import (
-    IDNameValidator,
+from demisto_sdk.commands.validate.validators.PA_validators.PA114_pack_metadata_version_should_be_raised import (
+    PackMetadataVersionShouldBeRaisedValidator,
 )
-from TestSuite.test_tools import str_in_call_args_list
 
 INTEGRATION = create_integration_object()
 INTEGRATION.path = Path(
@@ -43,9 +71,9 @@ INTEGRATION.path = Path(
 
 def get_validate_manager(mocker):
     validation_results = ResultWriter()
-    config_reader = ConfigReader(category_to_run="test")
+    config_reader = ConfigReader(category="test")
     initializer = Initializer()
-    mocker.patch.object(Initializer, "gather_objects_to_run_on", return_value={})
+    mocker.patch.object(Initializer, "gather_objects_to_run_on", return_value=({}, {}))
     return ValidateManager(
         validation_results=validation_results,
         config_reader=config_reader,
@@ -94,7 +122,9 @@ def get_validate_manager(mocker):
         ),
     ],
 )
-def test_filter_validators(mocker, validations_to_run, sub_classes, expected_results):
+def test_filter_validators(
+    mocker: MockerFixture, validations_to_run, sub_classes, expected_results
+):
     """
     Given
     a list of validation_to_run (config file select section mock), and a list of sub_classes (a mock for the BaseValidator sub classes)
@@ -111,45 +141,63 @@ def test_filter_validators(mocker, validations_to_run, sub_classes, expected_res
         - Case 4: Make sure the retrieved list contains only the validation with the error_code that actually co-op with the validation_to_run.
     """
     validate_manager = get_validate_manager(mocker)
-    validate_manager.configured_validations.validations_to_run = validations_to_run
+    mocker.patch.object(ConfiguredValidations, "select", validations_to_run)
     with patch.object(BaseValidator, "__subclasses__", return_value=sub_classes):
-        results = validate_manager.filter_validators()
-        assert results == expected_results
+        with patch(
+            "demisto_sdk.commands.validate.validators.base_validator.get_all_validators_specific_validation",
+            return_value=[],
+        ):
+            results = validate_manager.filter_validators()
+            assert results == expected_results
 
 
 @pytest.mark.parametrize(
-    "category_to_run, use_git, config_file_content, expected_results, ignore_support_level",
+    "category_to_run, execution_mode, config_file_content, expected_results, ignore_support_level, specific_validations, codes_to_ignore",
     [
-        (
+        pytest.param(
             None,
-            True,
-            {"use_git": {"select": ["BA101", "BC100", "PA108"]}},
-            ConfiguredValidations(["BA101", "BC100", "PA108"], [], [], {}),
-            False,
-        ),
-        (
-            "custom_category",
-            True,
+            ExecutionMode.USE_GIT,
             {
+                "use_git": {"select": ["BA101", "BC100", "PA108"]},
+                "ignorable_errors": ["E002", "W001"],
+            },
+            ConfiguredValidations(
+                ["BA101", "BC100", "PA108"], [], ["E002", "W001"], {}
+            ),
+            False,
+            [],
+            ["E002", "W001"],
+            id="Case 1",
+        ),
+        pytest.param(
+            "custom_category",
+            ExecutionMode.USE_GIT,
+            {
+                "ignorable_errors": ["BA101"],
                 "custom_category": {
-                    "ignorable_errors": ["BA101"],
                     "select": ["BA101", "BC100", "PA108"],
                 },
-                "use_git": {"select": ["TE105", "TE106", "TE107"]},
+                "use_git": {"select": ["TE105", "TE106", "TE107", "BA101"]},
             },
-            ConfiguredValidations(["BA101", "BC100", "PA108"], [], ["BA101"], {}),
+            ConfiguredValidations(["BC100", "PA108"], [], ["BA101"], {}),
             False,
+            [],
+            ["BA101"],
+            id="Case 2",
         ),
-        (
+        pytest.param(
             None,
-            False,
-            {"validate_all": {"select": ["BA101", "BC100", "PA108"]}},
+            ExecutionMode.SPECIFIC_FILES,
+            {"path_based_validations": {"select": ["BA101", "BC100", "PA108"]}},
             ConfiguredValidations(["BA101", "BC100", "PA108"], [], [], {}),
             False,
+            [],
+            [],
+            id="Case 3",
         ),
-        (
+        pytest.param(
             None,
-            True,
+            ExecutionMode.USE_GIT,
             {
                 "support_level": {"community": {"ignore": ["BA101", "BC100", "PA108"]}},
                 "use_git": {"select": ["TE105", "TE106", "TE107"]},
@@ -161,52 +209,77 @@ def test_filter_validators(mocker, validations_to_run, sub_classes, expected_res
                 {"community": {"ignore": ["BA101", "BC100", "PA108"]}},
             ),
             False,
+            [],
+            [],
+            id="Case 4",
         ),
-        (
+        pytest.param(
             None,
-            True,
+            ExecutionMode.USE_GIT,
             {
                 "support_level": {"community": {"ignore": ["BA101", "BC100", "PA108"]}},
                 "use_git": {"select": ["TE105", "TE106", "TE107"]},
             },
             ConfiguredValidations(["TE105", "TE106", "TE107"], [], [], {}),
             True,
+            [],
+            [],
+            id="Case 5",
+        ),
+        pytest.param(
+            None,
+            True,
+            {"use_git": {"select": ["BA101", "BC100", "PA108"]}},
+            ConfiguredValidations(["TE100", "TE101"], [], [], {}),
+            False,
+            ["TE100", "TE101"],
+            [],
+            id="Case 6",
         ),
     ],
 )
-def test_gather_validations_to_run(
-    mocker,
-    category_to_run,
-    use_git,
-    config_file_content,
-    expected_results,
-    ignore_support_level,
+def test_gather_validations_from_conf(
+    mocker: MockerFixture,
+    category_to_run: Optional[str],
+    execution_mode: ExecutionMode,
+    config_file_content: Dict,
+    expected_results: ConfiguredValidations,
+    ignore_support_level: bool,
+    specific_validations: List[str],
+    codes_to_ignore: List[str],
 ):
     """
     Given
     a category_to_run, a use_git flag, a config file content, and a ignore_support_level flag.
-        - Case 1: No category to run, use_git flag set to True, config file content with only use_git.select section, and ignore_support_level set to False.
-        - Case 2: A custom category to run, use_git flag set to True, config file content with use_git.select, and custom_category with both ignorable_errors and select sections, and ignore_support_level set to False.
-        - Case 3: No category to run, use_git flag set to False, config file content with validate_all.select section, and ignore_support_level set to False.
-        - Case 4: No category to run, use_git flag set to True, config file content with use_git.select, and support_level.community.ignore section, and ignore_support_level set to False.
-        - Case 5: No category to run, use_git flag set to True, config file content with use_git.select, and support_level.community.ignore section, and ignore_support_level set to True.
+        - Case 1: No category to run, execution_mode set to use_git, config file content with only use_git.select section, and ignore_support_level set to False, and an empty specific validations list.
+        - Case 2: A custom category to run, execution_mode set to use_git, config file content with use_git.select, and custom_category with both ignorable_errors and select sections, and ignore_support_level set to False, and an empty specific validations list.
+        - Case 3: No category to run, execution_mode not set to use_git, config file content with path_based_validations.select section, and ignore_support_level set to False, and an empty specific validations list.
+        - Case 4: No category to run, execution_mode set to use_git, config file content with use_git.select, and support_level.community.ignore section, and ignore_support_level set to False, and an empty specific validations list.
+        - Case 5: No category to run, execution_mode set to use_git, config file content with use_git.select, and support_level.community.ignore section, and ignore_support_level set to True, and an empty specific validations list.
+        - Case 6: No category to run, execution_mode set to use_git, config file content with only use_git.select section, ignore_support_level set to False, and a specific validations list with 2 error codes.
+
     When
-    - Calling the gather_validations_to_run function.
+    - Calling the gather_validations_from_conf function.
     Then
-        - Case 1: Make sure the retrieved results contains only use_git.select results
+        - Case 1: Make sure the retrieved results contains only use_git.select results.
         - Case 2: Make sure the retrieved results contains the custom category results and ignored the use_git results.
-        - Case 3: Make sure the retrieved results contains the validate_all results.
+        - Case 3: Make sure the retrieved results contains the path_based_validations results.
         - Case 4: Make sure the retrieved results contains both the support level and the use_git sections.
         - Case 5: Make sure the retrieved results contains only the use_git section.
+        - Case 6: Make sure the retrieved results contains only the specific validations section.
     """
     mocker.patch.object(toml, "load", return_value=config_file_content)
-    config_reader = ConfigReader(category_to_run=category_to_run)
-    results: ConfiguredValidations = config_reader.gather_validations_to_run(
-        use_git=use_git, ignore_support_level=ignore_support_level
+    config_reader = ConfigReader(
+        category=category_to_run, explicitly_selected=specific_validations
     )
-    assert results.validations_to_run == expected_results.validations_to_run
+    results: ConfiguredValidations = config_reader.read(
+        mode=execution_mode,
+        ignore_support_level=ignore_support_level,
+        codes_to_ignore=codes_to_ignore,
+    )
+    assert results.select == expected_results.select
     assert results.ignorable_errors == expected_results.ignorable_errors
-    assert results.only_throw_warnings == expected_results.only_throw_warnings
+    assert results.warning == expected_results.warning
     assert results.support_level_dict == expected_results.support_level_dict
 
 
@@ -219,7 +292,6 @@ def test_gather_validations_to_run(
                     validator=IDNameValidator(),
                     message="",
                     content_object=INTEGRATION,
-                    old_content_object=None,
                 )
             ],
             [],
@@ -232,16 +304,26 @@ def test_gather_validations_to_run(
                     }
                 ],
                 "fixed validations": [],
+                "invalid content items": [],
+                "Validations that caught exceptions": [],
             },
         ),
-        ([], [], {"validations": [], "fixed validations": []}),
+        (
+            [],
+            [],
+            {
+                "validations": [],
+                "fixed validations": [],
+                "invalid content items": [],
+                "Validations that caught exceptions": [],
+            },
+        ),
         (
             [
                 ValidationResult(
                     validator=IDNameValidator(),
                     message="",
                     content_object=INTEGRATION,
-                    old_content_object=None,
                 )
             ],
             [
@@ -266,6 +348,8 @@ def test_gather_validations_to_run(
                         "message": "Fixed this issue",
                     }
                 ],
+                "invalid content items": [],
+                "Validations that caught exceptions": [],
             },
         ),
     ],
@@ -361,6 +445,7 @@ def test_post_results(
     expected_error_call_count,
     expected_error_code_in_warnings,
     expected_error_code_in_errors,
+    caplog,
 ):
     """
     Given
@@ -376,28 +461,27 @@ def test_post_results(
         - Case 2: Make sure the exit_code is 1 (failure), and that the error logger was called once with 'BA101' and the warning logger wasn't called.
         - Case 3: Make sure the exit_code is 1 (failure), and that the error logger was called once with 'BA101' and the warning logger was called once with 'BC100'
     """
-    logger_error = mocker.patch.object(logging.getLogger("demisto-sdk"), "error")
-    logger_warning = mocker.patch.object(logging.getLogger("demisto-sdk"), "warning")
     validation_results = ResultWriter()
     validation_results.validation_results = results
     exit_code = validation_results.post_results(only_throw_warning=only_throw_warnings)
     assert exit_code == expected_exit_code
-    assert logger_warning.call_count == expected_warnings_call_count
-    assert logger_error.call_count == expected_error_call_count
-    for expected_error_code_in_warning in expected_error_code_in_warnings:
-        assert str_in_call_args_list(
-            logger_warning.call_args_list, expected_error_code_in_warning
-        )
-    for expected_error_code_in_error in expected_error_code_in_errors:
-        assert str_in_call_args_list(
-            logger_error.call_args_list, expected_error_code_in_error
-        )
+
+    log_by_level = map_reduce(caplog.records, lambda log: log.levelno)
+    warnings = log_by_level.get(30, ())
+    assert len(warnings) == expected_warnings_call_count
+    for code in expected_error_code_in_warnings:
+        assert code in " ".join({log.message for log in warnings})
+
+    errors = log_by_level.get(40, ())
+    assert len(errors) == expected_error_call_count
+    for code in expected_error_code_in_errors:
+        assert code in " ".join({log.message for log in errors})
 
 
 @pytest.mark.parametrize(
     "validator, expected_results",
     [
-        (IDNameValidator(), True),
+        (IDNameAllStatusesValidator(), True),
         (PackMetadataNameValidator(), False),
         (BreakingBackwardsSubtypeValidator(), False),
     ],
@@ -406,9 +490,9 @@ def test_should_run(validator, expected_results):
     """
     Given:
     A validator.
-        - Case 1: IDNameValidator which support Integration content type.
+        - Case 1: IDNameAllStatusesValidator which support Integration content type.
         - Case 2: PackMetadataNameValidator which doesn't support Integration content type.
-        - Case 3: IDNameValidator which support Integration content type only for modified and renamed git statuses.
+        - Case 3: BreakingBackwardsSubtypeValidator which support Integration content type only for modified and renamed git statuses.
     When:
     - Calling the should_run function on a given integration.
     Then:
@@ -417,4 +501,436 @@ def test_should_run(validator, expected_results):
         - Case 2: Should return False.
         - Case 3: Should return False.
     """
-    assert expected_results == validator.should_run(INTEGRATION, [], {})
+    assert expected_results == validator.should_run(
+        INTEGRATION, [], {}, running_execution_mode=ExecutionMode.USE_GIT
+    )
+
+
+def test_should_run_api_module():
+    """
+    Given:
+    A validator.
+        - Case 1: A docker image validator and an APIModule script.
+    When:
+    - Calling the should_run function.
+    Then:
+    Make sure the right result is returned.
+        - Case 1: Should return False.
+    """
+    script = create_script_object()
+    script.path = script.path.parent / "testAPIModule.yml"
+    validator = DockerImageTagIsNotOutdated()
+    assert not validator.should_run(
+        script, [], {}, running_execution_mode=ExecutionMode.USE_GIT
+    )
+
+
+def test_object_collection_with_readme_path(repo):
+    """
+    Given:
+    - A path to integration readme
+    When:
+    - Calling the paths_to_basecontent_set.
+    Then:
+    - Make sure that an integration was parsed.
+    """
+
+    yml_content = load_yaml("integration.yml")
+    pack = repo.create_pack("pack_no_1")
+    integration = pack.create_integration(yml=yml_content)
+    integration.code.write("from MicrosoftApiModule import *")
+    integration.readme.write("test")
+    readme_path = integration.readme.path
+    initializer = Initializer()
+    obj_set, _, _ = initializer.paths_to_basecontent_set({Path(readme_path)})
+    obj = obj_set.pop()
+    assert obj is not None
+    assert obj.content_type == ContentType.INTEGRATION
+
+
+def test_object_collection_with_pack_path(repo):
+    """
+    Given:
+    - A path to a pack that contain an integration.
+    When:
+    - Calling the gather_objects_to_run_on.
+    Then:
+    - Make sure that both the pack and the integration object were returned.
+    """
+
+    yml_content = load_yaml("integration.yml")
+    pack = repo.create_pack("pack_no_1")
+    integration = pack.create_integration(yml=yml_content)
+    integration.code.write("from MicrosoftApiModule import *")
+    integration.readme.write("test")
+    initializer = Initializer(
+        file_path=str(pack.path), execution_mode=ExecutionMode.SPECIFIC_FILES
+    )
+    obj_set, _ = initializer.gather_objects_to_run_on()
+    obj_types = {obj.content_type for obj in obj_set}
+    assert obj_types == {ContentType.INTEGRATION, ContentType.PACK}
+
+
+def test_load_files_with_pack_path(repo):
+    """
+    Given:
+    - A path to a pack that contain an integration.
+    When:
+    - Calling the load_files.
+    Then:
+    - Make sure that only the path to the pack was returned in PosixPath form.
+    """
+    pack = repo.create_pack("pack_no_1")
+    pack.create_integration()
+    initializer = Initializer()
+    loaded_files_set = initializer.load_files([str(pack.path)])
+    assert len(loaded_files_set) == 1
+    assert loaded_files_set.pop() == pack.path
+
+
+def test_load_files_with_integration_dir(repo):
+    """
+    Given:
+    - A path to the integration dir of a pack.
+    When:
+    - Calling the load_files.
+    Then:
+    - Make sure that all the files from that dir was returned.
+    """
+    pack = repo.create_pack("pack_no_1")
+    integration = pack.create_integration()
+    initializer = Initializer()
+    integration_dir = f"{pack.path}/{INTEGRATIONS_DIR}"
+    loaded_files_set = initializer.load_files([integration_dir])
+    assert len(loaded_files_set) != 1
+    assert all(
+        Path(path) in loaded_files_set
+        for path in (
+            integration.yml.path,
+            integration.readme.path,
+            integration.code.path,
+            integration.description.path,
+        )
+    )
+
+
+def test_collect_related_files_main_items(repo):
+    """
+    Given:
+    - A path to integration code, modeling_rule schema, and pack readme.
+    When:
+    - Calling the collect_related_files_main_items.
+    Then:
+    - Make sure that the right main passes were returned:
+        - integration code should return the integration yml path.
+        - modeling_rule schema should return the modeling_rule yml path.
+        - pack readme should return the pack_metadata.json pack..
+    """
+    pack = repo.create_pack("pack_no_1")
+    initializer = Initializer()
+    integration = pack.create_integration()
+    modeling_rule = pack.create_modeling_rule({})
+    results = initializer.collect_related_files_main_items(
+        {
+            Path(integration.code.path),
+            Path(modeling_rule.schema.path),
+            Path(pack.readme.path),
+        }
+    )
+    assert results == {
+        Path(integration.yml.path),
+        Path(modeling_rule.yml.path),
+        Path(pack.pack_metadata.path),
+    }
+
+
+def test_get_items_status(repo):
+    """
+    Given:
+    - A dictionary with:
+        - A path to integration code with ADDED git status.
+        - A path to script code with ADDED git status.
+        - A path to integration yml with MODIFIED git status.
+        - A path to modeling_rule schema with MODIFIED git status.
+        - A path to pack readme with ADDED git status.
+        - A path to pack metadata with MODIFIED git status.
+    When:
+    - Calling the collect_related_files_main_items.
+    Then:
+    - Make sure that the right amount of paths are returned and that the right statuses were given:
+        - The integration code and yml should return the integration yml path with the yml status (MODIFIED).
+        - The modeling_rule schema should return the modeling_rule yml path with no status.
+        - The pack readme and pack_metadata.json should return the pack_metadata.json path with the pack_metadata.json status (MODIFIED).
+        - The script code should return the script yml path with script code status (ADDED).
+    """
+    pack = repo.create_pack("pack_no_1")
+    initializer = Initializer()
+    integration = pack.create_integration()
+    modeling_rule = pack.create_modeling_rule({})
+    script = pack.create_script()
+    statuses_dict = {
+        Path(integration.code.path): GitStatuses.ADDED,
+        Path(script.code.path): GitStatuses.ADDED,
+        Path(integration.yml.path): GitStatuses.MODIFIED,
+        Path(modeling_rule.schema.path): GitStatuses.MODIFIED,
+        Path(pack.readme.path): GitStatuses.ADDED,
+        Path(pack.pack_metadata.path): GitStatuses.MODIFIED,
+    }
+    results = initializer.get_items_status(statuses_dict)
+    expected_results = {
+        Path(integration.yml.path): GitStatuses.MODIFIED,
+        Path(modeling_rule.yml.path): None,
+        Path(pack.pack_metadata.path): GitStatuses.MODIFIED,
+        Path(script.yml.path): GitStatuses.ADDED,
+    }
+    assert len(results.keys()) == 4
+    assert all(
+        expected_results[item_path] == git_status
+        for item_path, git_status in results.items()
+    )
+
+
+def test_all_error_codes_configured():
+    """
+    test that the set of all validation errors that exist in the new format and the set of all the validation errors configured in the sdk_validation_config are equal to ensure all new validations are being tested.
+    """
+    config_file_path = "demisto_sdk/commands/validate/sdk_validation_config.toml"
+    config_file_content: dict = toml.load(config_file_path)
+    configured_errors_set: Set[str] = set()
+    for section in ("use_git", "path_based_validations"):
+        for key in ("select", "warning"):
+            configured_errors_set = configured_errors_set.union(
+                set(config_file_content[section][key])
+            )
+    existing_error_codes: Set[str] = set(
+        [validator.error_code for validator in get_all_validators()]
+    )
+    non_configured_existing_error_codes = existing_error_codes - configured_errors_set
+    assert not non_configured_existing_error_codes, f"The following error codes are not configured in the config file at 'demisto_sdk/commands/validate/sdk_validation_config.toml': {non_configured_existing_error_codes}."
+
+
+def test_validation_prefix():
+    """
+    Given   All validators
+    When    Checking for their prefixes
+    Then    Make sure it's from the allowed list of prefixes
+    """
+    prefix_to_validator = map_reduce(get_all_validators(), lambda v: v.error_category)
+    invalid = {
+        validation
+        for prefix, validation in prefix_to_validator.items()
+        if prefix not in VALIDATION_CATEGORIES
+    }
+    assert not invalid, sorted(invalid)
+
+
+def test_rationale():
+    """
+    Tests that all validators have a non-empty rationale.
+    If this test failed when you modified a validator, go ahead and add the rationale attribute, explaining *why* the validation exists.
+    """
+    assert not [
+        validator for validator in get_all_validators() if not validator.rationale
+    ]
+
+
+def test_description():
+    """
+    Tests that all validators have a non-empty description.
+    If this test failed when you modified a validator, go ahead and add the description attribute, explaining *what* the validation checks in content.
+    """
+    assert not [
+        validator for validator in get_all_validators() if not validator.description
+    ]
+
+
+@pytest.mark.parametrize(
+    "untracked_files, modified_files, untracked_files_in_content, list_of_file_paths ,expected_output",
+    [
+        (
+            ["Packs/untracked.txt"],
+            set([Path("Packs/modified.txt")]),
+            set([Path("Packs/untracked.txt")]),
+            ["Packs/modified.txt", "Packs/untracked.txt"],
+            set([Path("Packs/modified.txt"), Path("Packs/untracked.txt")]),
+        ),
+        (
+            [
+                "Packs/untracked_1.txt",
+                "Packs/untracked_2.txt",
+                "invalid/path/untracked.txt",
+                "another/invalid/path/untracked.txt",
+            ],
+            set([Path("Packs/modified.txt")]),
+            set(
+                [
+                    Path("Packs/untracked_1.txt"),
+                    Path("Packs/untracked_2.txt"),
+                ]
+            ),
+            ["Packs/modified.txt", "Packs/untracked_1.txt", "Packs/untracked_2.txt"],
+            set(
+                [
+                    Path("Packs/modified.txt"),
+                    Path("Packs/untracked_1.txt"),
+                    Path("Packs/untracked_2.txt"),
+                ]
+            ),
+        ),
+        (
+            [
+                "Packs/untracked_1.txt",
+                "Packs/untracked_2.txt",
+                "invalid/path/untracked.txt",
+                "another/invalid/path/untracked.txt",
+            ],
+            set(),
+            set(
+                [
+                    Path("Packs/untracked_1.txt"),
+                    Path("Packs/untracked_2.txt"),
+                ]
+            ),
+            ["Packs/untracked_1.txt", "Packs/untracked_2.txt"],
+            set(
+                [
+                    Path("Packs/untracked_1.txt"),
+                    Path("Packs/untracked_2.txt"),
+                ]
+            ),
+        ),
+    ],
+    ids=[
+        "Valid untracked and modified files",
+        "Invalid untracked, valid untracked and modified files",
+        "No modified files, invalid and valid untracked files only",
+    ],
+)
+def test_get_unfiltered_changed_files_from_git_in_external_pr_use_case(
+    mocker,
+    untracked_files,
+    modified_files,
+    untracked_files_in_content,
+    list_of_file_paths,
+    expected_output,
+):
+    """
+    This UT verifies changes made to validate command to support collection of
+    untracked files when running the build on an external contribution PR.
+    The UT mocks reading form the contribution_files_relative_paths.txt created
+    in Utils/update_contribution_pack_in_base_branch.py (Infra) as part of this flow.
+
+    Given:
+        - A content build is running on external contribution PR, meaning:
+            - `CONTRIB_BRANCH` environment variable exists.
+            - validate command is running in context of an external contribution PR
+    When:
+        Case 1: All untracked files have a "Pack/..." path, regular modified files are also exist.
+        Case 2: Not all untracked files have a "Pack/..." path, irrelevant untracked files exist which validate shouldn't run on.
+                Regular modified files are also exist.
+        Case 3: Not all untracked files have a "Pack/..." path, irrelevant untracked files also exist, regular modified files are also exist, No modified files.
+
+    Then:
+        - Collect all files within "Packs/" path and run the pre commit on them along with regular modified files if exist.
+    """
+    initializer = Initializer()
+    initializer.validate_git_installed()
+    mocker.patch.object(GitUtil, "modified_files", return_value=modified_files)
+    mocker.patch.dict(os.environ, {"CONTRIB_BRANCH": "true"})
+    mocker.patch.object(GitUtil, "added_files", return_value={})
+    mocker.patch.object(GitUtil, "renamed_files", return_value={})
+    mocker.patch(
+        "git.repo.base.Repo._get_untracked_files", return_value=untracked_files
+    )
+
+    with open("contribution_files_relative_paths.txt", "w") as file:
+        temp_file = Path("contribution_files_relative_paths.txt")
+        for line in list_of_file_paths:
+            file.write(f"{line}\n")
+
+    output = initializer.get_unfiltered_changed_files_from_git()
+    assert output[1] == expected_output
+
+    if Path.exists(temp_file):
+        Path.unlink(temp_file)
+
+
+def test_ignored_with_run_all(mocker):
+    """
+    This UT verifies that when running with -a on validators that run on all files,
+    we don't fail content_items that should be ignored although they raised an error.
+
+    Given:
+        A ValidateManager object with one integration and one script, one validator ignored by the integration
+    When:
+        Calling run_validations with -a and throwing an error only for the integration.
+    Then:
+        - Ensure that the error received from the validator didn't fail run_validations.
+    """
+    validate_manager = get_validate_manager(mocker)
+    validate_manager.configured_validations = ConfiguredValidations(
+        select=["GR100"],
+        warning=[],
+        ignorable_errors=["GR100"],
+        support_level_dict={},
+    )
+    validate_manager.initializer.execution_mode = ExecutionMode.ALL_FILES
+    validator = MarketplacesFieldValidatorAllFiles()
+    validate_manager.validators = [validator]
+    mocker.patch.object(Integration, "ignored_errors", ["GR100"])
+    mocker.patch.object(Script, "ignored_errors", [])
+    integration = create_integration_object()
+    script = create_script_object()
+    mocker.patch.object(
+        MarketplacesFieldValidatorAllFiles,
+        "obtain_invalid_content_items",
+        return_value=[
+            ValidationResult(
+                validator=validator,
+                message="error",
+                content_object=integration,
+            )
+        ],
+    )
+    validate_manager.objects_to_run = [integration, script]
+    assert 0 == validate_manager.run_validations()
+
+
+def test_check_metadata_version_bump_on_content_changes(mocker, repo):
+    """
+    Given: pack with newly added integration.
+    When: Initializing ValidateManager using git.
+    Then: Ensure PackMetadataVersionShouldBeRaisedValidator is initialized and the external args are properly passed.
+    """
+    pack = create_pack_object(["currentVersion"], ["1.1.1"])
+    integration = create_integration_object()
+    pack.content_items.integration.extend(integration)
+    validation_results = ResultWriter()
+    config_reader = ConfigReader(explicitly_selected=["PA114"])
+    mocker.patch.object(
+        Initializer,
+        "get_files_using_git",
+        return_value=({BaseContent.from_path(Path(integration.path)), pack}, {}, {}),
+    )
+    mocker.patch.object(
+        BaseContent,
+        "from_path",
+        return_value=BaseContent.from_path(Path(pack.path), metadata_only=True),
+    )
+    initializer = Initializer(
+        prev_ver="some_prev_ver", execution_mode=ExecutionMode.USE_GIT
+    )
+
+    validate_manager = ValidateManager(
+        validation_results=validation_results,
+        config_reader=config_reader,
+        initializer=initializer,
+    )
+
+    version_bump_validator = None
+    for validator in validate_manager.validators:
+        if isinstance(validator, PackMetadataVersionShouldBeRaisedValidator):
+            version_bump_validator = validator
+
+    # Assert the PA114 validation will run
+    assert version_bump_validator

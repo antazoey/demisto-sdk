@@ -18,6 +18,7 @@ from wcmatch.pathlib import NEGATE, Path
 
 from demisto_sdk.commands.common.constants import (
     API_MODULE_FILE_SUFFIX,
+    DOCKER_REGISTRY_URL,
     FORMATTING_SCRIPT,
     INTEGRATIONS_DIR,
     NATIVE_IMAGE_FILE_NAME,
@@ -365,10 +366,10 @@ class Linter:
                 return True
             self._facts["images"] = [[image, -1] for image in images]
 
-            # we want to use the docker-io.art.code.pan.run only if we run in content build (and not CI/CD for example)
+            # we want to use DOCKER_REGISTRY_URL only if we run in content build (and not CI/CD for example)
             if os.getenv("CONTENT_GITLAB_CI", False):
                 self._facts["images"] = [
-                    [f"docker-io.art.code.pan.run/{image[0]}", -1]
+                    [f"{DOCKER_REGISTRY_URL}/{image[0]}", -1]
                     for image in self._facts["images"]
                 ]
             # Gather environment variables for docker execution
@@ -407,7 +408,8 @@ class Linter:
                 self._facts["test"] = (
                     True
                     if next(
-                        self._pack_abs_dir.glob([r"test_*.py", r"*_test.py"]), None  # type: ignore
+                        self._pack_abs_dir.glob([r"test_*.py", r"*_test.py"]),
+                        None,  # type: ignore
                     )
                     else False
                 )
@@ -467,10 +469,14 @@ class Linter:
         if "commonserver" in self._pack_abs_dir.name.lower():
             # Powershell
             if self._pkg_lint_status["pack_type"] == TYPE_PWSH:
-                self._facts["lint_files"] = [Path(self._pack_abs_dir / "CommonServerPowerShell.ps1")]  # type: ignore
+                self._facts["lint_files"] = [
+                    Path(self._pack_abs_dir, "CommonServerPowerShell.ps1")  # type: ignore[arg-type]
+                ]
             # Python
             elif self._pkg_lint_status["pack_type"] == TYPE_PYTHON:
-                self._facts["lint_files"] = [Path(self._pack_abs_dir / "CommonServerPython.py")]  # type: ignore
+                self._facts["lint_files"] = [
+                    Path(self._pack_abs_dir / "CommonServerPython.py")  # type: ignore[arg-type]
+                ]
         else:
             test_modules = {
                 self._pack_abs_dir / module.name for module in modules.keys()
@@ -730,7 +736,9 @@ class Linter:
         logger.info(f"{log_prompt} - Start")
         with add_typing_module(lint_files=lint_files, python_version=py_num):  # type: ignore
             mypy_command = build_mypy_command(
-                files=lint_files, version=py_num, content_repo=self._content_repo  # type: ignore
+                files=lint_files,  # type: ignore[arg-type]
+                version=py_num,
+                content_repo=self._content_repo,
             )
             stdout, stderr, exit_code = run_command_os(
                 command=mypy_command, cwd=self._pack_abs_dir
@@ -929,7 +937,7 @@ class Linter:
         py_ver = None
         if docker_base_image[1] != -1:
             py_ver = parse(docker_base_image[1]).major  # type: ignore
-        test_image_name, errors = docker_base.pull_or_create_test_image(
+        test_image_name, errors = docker_base.get_or_create_test_image(
             docker_base_image[0],
             additional_requirements=self._facts["additional_requirements"],
             container_type=self._pkg_lint_status["pack_type"],

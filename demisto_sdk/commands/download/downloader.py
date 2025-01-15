@@ -13,6 +13,7 @@ from typing import DefaultDict, Dict
 
 import demisto_client.demisto_api
 import mergedeep
+import typer
 from demisto_client.demisto_api.rest import ApiException
 from dictor import dictor
 from flatten_dict import unflatten
@@ -25,6 +26,7 @@ from demisto_sdk.commands.common.constants import (
     ENTITY_NAME_SEPARATORS,
     ENTITY_TYPE_TO_DIR,
     INTEGRATIONS_DIR,
+    LISTS_DIR,
     PLAYBOOKS_DIR,
     SCRIPTS_DIR,
     TEST_PLAYBOOKS_DIR,
@@ -47,11 +49,13 @@ from demisto_sdk.commands.common.tools import (
     get_yaml,
     get_yml_paths_in_dir,
     is_sdk_defined_working_offline,
+    pascal_case,
     safe_read_unicode,
     write_dict,
 )
 from demisto_sdk.commands.format.format_module import format_manager
 from demisto_sdk.commands.init.initiator import Initiator
+from demisto_sdk.commands.split.jsonsplitter import JsonSplitter
 from demisto_sdk.commands.split.ymlsplitter import YmlSplitter
 
 
@@ -101,6 +105,22 @@ KEEP_EXISTING_YAML_FIELDS = [
 ]
 
 
+def format_playbook_task(content_item_data: dict[str, dict]):
+    """This function checks if there are tasks that run sub-playbooks and converts 'playbookId' to 'playbookName' where applicable.
+       XSUP-39266: replacing playbookId with playbookName in tasks.
+
+    Args:
+        content_item_data (Dict): The content item data containing tasks.
+    """
+    content_data = content_item_data.get("data", {})
+    all_tasks_data = content_data.get("tasks", {})
+    if isinstance(all_tasks_data, dict) and all_tasks_data:
+        for task_id, task_data in all_tasks_data.items():
+            playbook_id_value = task_data.get("task", {}).get("playbookId")
+            if task_data.get("type") == "playbook" and playbook_id_value:
+                task_data["task"]["playbookName"] = task_data["task"].pop("playbookId")
+
+
 class Downloader:
     """
     A class for downloading content from an XSOAR / XSIAM server.
@@ -139,7 +159,7 @@ class Downloader:
         **kwargs,
     ):
         self.output_pack_path = output
-        self.input_files = [input] if isinstance(input, str) else list(input)
+        self.input_files = list(input) if input else []
         self.regex = regex
         self.force = force
         self.download_system_items = system
@@ -166,21 +186,19 @@ class Downloader:
             int: Exit code. 1 if failed, 0 if succeeded
         """
         input_files_missing = False  # Used for returning an exit code of 1 if one of the inputs is missing.
-
         try:
             if self.should_list_files:
                 # No flag validations are needed, since only the '-lf' flag is used.
                 self.list_all_custom_content()
-                return 0
-
+                raise typer.Exit(0)
             if not self.output_pack_path:
                 logger.error("Error: Missing required parameter '-o' / '--output'.")
-                return 1
+                raise typer.Exit(1)
 
             output_path = Path(self.output_pack_path)
 
             if not self.verify_output_path(output_path=output_path):
-                return 1
+                raise typer.Exit(1)
 
             if self.should_init_new_pack:
                 output_path = self.initialize_output_path(root_folder=output_path)
@@ -190,13 +208,13 @@ class Downloader:
                     logger.error(
                         "Error: Missing required parameter for downloading system items: '-i' / '--input'."
                     )
-                    return 1
+                    raise typer.Exit(1)
 
                 if not self.system_item_type:
                     logger.error(
                         "Error: Missing required parameter for downloading system items: '-it' / '--item-type'."
                     )
-                    return 1
+                    raise typer.Exit(1)
 
                 content_item_type = self.system_item_type
                 downloaded_content_objects = self.fetch_system_content(
@@ -212,7 +230,7 @@ class Downloader:
                         "Error: No input parameter has been provided "
                         "('-i' / '--input', '-r' / '--regex', '-a' / '--all)."
                     )
-                    return 1
+                    raise typer.Exit(1)
 
                 elif self.regex:
                     # Assure regex is valid
@@ -223,7 +241,7 @@ class Downloader:
                         logger.error(
                             f"Error: Invalid regex pattern provided: '{self.regex}'."
                         )
-                        return 1
+                        raise typer.Exit(1)
 
                 all_custom_content_data = self.download_custom_content()
                 all_custom_content_objects = self.parse_custom_content_data(
@@ -234,7 +252,9 @@ class Downloader:
                 downloaded_content_objects = self.filter_custom_content(
                     custom_content_objects=all_custom_content_objects
                 )
-
+                for _, value in downloaded_content_objects.items():
+                    if value["type"] == FileType.PLAYBOOK:
+                        format_playbook_task(value)
                 if self.input_files:
                     downloaded_content_item_names = [
                         item["name"] for item in downloaded_content_objects.values()
@@ -252,7 +272,7 @@ class Downloader:
                     logger.info(
                         "No custom content matching the provided input filters was found."
                     )
-                    return 1 if input_files_missing else 0
+                    raise typer.Exit(1) if input_files_missing else typer.Exit(0)
 
                 if self.auto_replace_uuids:
                     # Replace UUID IDs with names in filtered content (only content we download)
@@ -260,17 +280,10 @@ class Downloader:
                         custom_content_objects=all_custom_content_objects
                     )
 
-                    changed_uuids_count = 0
-                    for file_object in downloaded_content_objects.values():
-                        if self.replace_uuid_ids(
-                            custom_content_object=file_object, uuid_mapping=uuid_mapping
-                        ):
-                            changed_uuids_count += 1
-
-                    if changed_uuids_count > 0:
-                        logger.info(
-                            f"Replaced UUID IDs with names in {changed_uuids_count} custom content items."
-                        )
+                    self.replace_uuid_ids(
+                        custom_content_objects=downloaded_content_objects,
+                        uuid_mapping=uuid_mapping,
+                    )
 
             existing_pack_data = self.build_existing_pack_structure(
                 existing_pack_path=output_path
@@ -284,16 +297,20 @@ class Downloader:
 
             if not result:
                 logger.error("Download failed.")
-                return 1
+                raise typer.Exit(1)
 
-            return 1 if input_files_missing else 0
+            raise typer.Exit(1) if input_files_missing else typer.Exit(0)
+
+        except typer.Exit:
+            # Re-raise typer.Exit without handling it as an error
+            raise
 
         except Exception as e:
             if not isinstance(e, HandledError):
                 logger.error(f"Error: {e}")
 
             logger.debug("Traceback:\n" + traceback.format_exc())
-            return 1
+            raise typer.Exit(1)
 
     def list_all_custom_content(self):
         """
@@ -453,6 +470,46 @@ class Downloader:
         return loaded_files
 
     def replace_uuid_ids(
+        self, custom_content_objects: dict[str, dict], uuid_mapping: dict[str, str]
+    ):
+        """
+        Find and replace UUID IDs of custom content items with their names (using the provided mapping).
+
+        Note:
+            This method modifies the provided 'custom_content_objects' dictionary.
+
+        Args:
+            custom_content_objects (dict[str, dict]): A dictionary mapping custom content names
+                to their corresponding objects.
+            uuid_mapping (dict[str, str]): A dictionary mapping UUID IDs to corresponding names of custom content.
+        """
+        changed_uuids_count = 0
+        failed_content_items = set()
+
+        for original_file_name, file_object in custom_content_objects.items():
+            try:
+                if self.replace_uuid_ids_for_item(
+                    custom_content_object=file_object, uuid_mapping=uuid_mapping
+                ):
+                    changed_uuids_count += 1
+
+            except Exception as e:
+                # If UUID replacement failed, we skip the file
+                logger.warning(
+                    f"Could not replace UUID IDs in '{file_object['name']}'. "
+                    f"Content item will be skipped.\nError: {e}"
+                )
+                failed_content_items.add(original_file_name)
+
+        for failed_content_item in failed_content_items:
+            custom_content_objects.pop(failed_content_item)
+
+        if changed_uuids_count > 0:
+            logger.info(
+                f"Replaced UUID IDs with names in {changed_uuids_count} custom content items."
+            )
+
+    def replace_uuid_ids_for_item(
         self, custom_content_object: dict, uuid_mapping: dict[str, str]
     ) -> bool:
         """
@@ -475,11 +532,21 @@ class Downloader:
                     f"Replacing UUID '{uuid}' with '{uuid_mapping[uuid]}' in "
                     f"'{custom_content_object['name']}'"
                 )
-                content_item_file_content = content_item_file_content.replace(
-                    uuid, uuid_mapping[uuid]
-                )
 
-            # Update ID, if it's a UUID
+                if custom_content_object["file_extension"] in ("yml", "yaml"):
+                    # Wrap the new ID with quotes for cases where the name contains special characters like ':'.
+                    # Handle cases where there are quotes already surrounding the ID (avoid duplicate quotes).
+                    for replace_str in (f"'{uuid}'", f'"{uuid}"', uuid):
+                        content_item_file_content = content_item_file_content.replace(
+                            replace_str, f"'{uuid_mapping[uuid]}'"
+                        )
+
+                else:
+                    content_item_file_content = content_item_file_content.replace(
+                        uuid, uuid_mapping[uuid]
+                    )
+
+            # Update ID if it's a UUID
             if custom_content_object["id"] in uuid_mapping:
                 custom_content_object["id"] = uuid_mapping[custom_content_object["id"]]
 
@@ -989,7 +1056,7 @@ class Downloader:
             if content_entity_path.is_dir():
                 directory_name = content_entity_path.name
 
-                if directory_name in (INTEGRATIONS_DIR, SCRIPTS_DIR):
+                if directory_name in (INTEGRATIONS_DIR, SCRIPTS_DIR, LISTS_DIR):
                     # If entity is of type integration/script it will have dirs, otherwise files
                     directory_items = [
                         p for p in content_entity_path.iterdir() if p.is_dir()
@@ -1128,9 +1195,19 @@ class Downloader:
                 return get_yaml(content_item_path)
 
         else:
+            if content_type == LISTS_DIR and content_item_path.is_dir():
+                # Collect json files to return the list metadata
+                json_files = [
+                    path
+                    for path in content_item_path.iterdir()
+                    if path.suffix == ".json" and not path.stem.endswith("_data")
+                ]
+                if not json_files:
+                    return None
+                return get_json(str(json_files[0]))
+
             if content_item_path.is_file() and content_item_path.suffix == ".json":
                 return get_json(content_item_path)
-
         return None
 
     @staticmethod
@@ -1274,6 +1351,7 @@ class Downloader:
             for file_name, content_object in downloaded_content_objects.items():
                 content_item_name: str = content_object["name"]
                 content_item_entity: str = content_object["entity"]
+                content_item_type: FileType = content_object["type"]
 
                 content_item_exists = (  # Content item already exists in output pack
                     content_item_name
@@ -1290,7 +1368,8 @@ class Downloader:
                 downloaded_files: list[Path] = []
 
                 try:
-                    if content_item_exists:
+                    if content_item_exists and content_item_type != FileType.LISTS:
+                        # We skip 'download_existing_content_items' logic for lists since 'smart-merge' is irrelevant for lists
                         downloaded_files = self.download_existing_content_items(
                             content_object=content_object,
                             existing_pack_structure=existing_pack_structure,
@@ -1306,7 +1385,7 @@ class Downloader:
                 except Exception as e:
                     failed_downloads_count += 1
                     logger.error(
-                        f"Failed to download content item '{content_item_name}': {e}"
+                        f"Failed to download content item '{content_item_name}': {str(e)}"
                     )
                     logger.debug(traceback.format_exc())
                     continue
@@ -1319,6 +1398,7 @@ class Downloader:
                             input=str(downloaded_file),
                             no_validate=False,
                             assume_answer=False,
+                            clear_cache=True,
                         )
 
         summary_log = ""
@@ -1389,6 +1469,26 @@ class Downloader:
             extractor.extract_to_package_format()
 
             # Add items to downloaded_files
+            for file_path in download_path.iterdir():
+                if file_path.is_file():
+                    downloaded_files.append(file_path)
+
+        elif content_item_entity_directory == LISTS_DIR:
+            download_path = (
+                output_path
+                / content_item_entity_directory
+                / pascal_case(content_item_name)
+            )
+            download_path.mkdir(parents=True, exist_ok=True)
+
+            JsonSplitter(
+                input=content_item_file_name,
+                output=download_path,
+                no_auto_create_dir=True,
+                file_type=content_item_type,
+                input_file_data=content_object["data"],
+            ).split_json()
+
             for file_path in download_path.iterdir():
                 if file_path.is_file():
                     downloaded_files.append(file_path)

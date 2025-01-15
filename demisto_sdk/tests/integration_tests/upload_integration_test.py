@@ -1,15 +1,17 @@
-import logging
 from io import BytesIO
 from os.path import join
 from pathlib import Path
+from tempfile import TemporaryDirectory
+from unittest import mock
 from zipfile import ZipFile
 
 import demisto_client
 import pytest
-from click.testing import CliRunner
 from packaging.version import Version
+from rich.console import Console
+from typer.testing import CliRunner
 
-from demisto_sdk.__main__ import main
+from demisto_sdk.__main__ import app
 from demisto_sdk.commands.common.handlers import DEFAULT_JSON_HANDLER as json
 from demisto_sdk.commands.common.handlers import YAML_Handler
 from demisto_sdk.commands.common.legacy_git_tools import git_path
@@ -24,14 +26,12 @@ from demisto_sdk.commands.upload.tests.uploader_test import (
     mock_upload_method,
 )
 from demisto_sdk.commands.upload.uploader import (
-    ERROR_RETURN_CODE,
     SUCCESS_RETURN_CODE,
 )
-from TestSuite.test_tools import ChangeCWD, flatten_call_args, str_in_call_args_list
+from TestSuite.test_tools import ChangeCWD
 
 UPLOAD_CMD = "upload"
 DEMISTO_SDK_PATH = join(git_path(), "demisto_sdk")
-
 
 yaml = YAML_Handler()
 
@@ -60,7 +60,6 @@ def test_integration_upload_pack_positive(demisto_client_mock, mocker):
     """
     import demisto_sdk.commands.content_graph.objects.content_item as content_item
 
-    logger_info = mocker.patch.object(logging.getLogger("demisto-sdk"), "info")
     pack_path = Path(
         DEMISTO_SDK_PATH, "tests/test_files/content_repo_example/Packs/FeedAzure"
     )
@@ -81,25 +80,88 @@ def test_integration_upload_pack_positive(demisto_client_mock, mocker):
     runner = CliRunner(mix_stderr=False)
     mocker.patch.object(PackParser, "parse_ignored_errors", return_value={})
     result = runner.invoke(
-        main, [UPLOAD_CMD, "-i", str(pack_path), "--insecure", "--no-zip"]
+        app, [UPLOAD_CMD, "-i", str(pack_path), "--insecure", "--no-zip"]
     )
     assert result.exit_code == 0
-    logged = flatten_call_args(logger_info.call_args)
-    assert len(logged) == 1
-    assert logged[0] == "\n".join(
-        (
-            "[green]SUCCESSFUL UPLOADS:",
-            "╒═════════════════════════╤═══════════════╤═══════════════╤════════════════╕",
-            "│ NAME                    │ TYPE          │ PACK NAME     │ PACK VERSION   │",
-            "╞═════════════════════════╪═══════════════╪═══════════════╪════════════════╡",
-            "│ incidentfield-city.json │ IncidentField │ AzureSentinel │ 1.0.0          │",
-            "├─────────────────────────┼───────────────┼───────────────┼────────────────┤",
-            "│ FeedAzure.yml           │ Integration   │ AzureSentinel │ 1.0.0          │",
-            "├─────────────────────────┼───────────────┼───────────────┼────────────────┤",
-            "│ FeedAzure_test.yml      │ Playbook      │ AzureSentinel │ 1.0.0          │",
-            "╘═════════════════════════╧═══════════════╧═══════════════╧════════════════╛",
-            "[/green]",
+    assert (
+        "\n".join(
+            (
+                "SUCCESSFUL UPLOADS:",
+                "╒═════════════════════════╤═══════════════╤═══════════════╤════════════════╕",
+                "│ NAME                    │ TYPE          │ PACK NAME     │ PACK VERSION   │",
+                "╞═════════════════════════╪═══════════════╪═══════════════╪════════════════╡",
+                "│ incidentfield-city.json │ IncidentField │ AzureSentinel │ 1.0.0          │",
+                "├─────────────────────────┼───────────────┼───────────────┼────────────────┤",
+                "│ FeedAzure.yml           │ Integration   │ AzureSentinel │ 1.0.0          │",
+                "├─────────────────────────┼───────────────┼───────────────┼────────────────┤",
+                "│ FeedAzure_test.yml      │ Playbook      │ AzureSentinel │ 1.0.0          │",
+                "╘═════════════════════════╧═══════════════╧═══════════════╧════════════════╛",
+            )
         )
+        in result.output
+    )
+
+
+def test_integration_upload_pack_with_specific_marketplace(demisto_client_mock, mocker):
+    """
+    Given
+    - Content pack named Example Pack to upload.
+
+    When
+    - Uploading the pack.
+
+    Then
+    - Ensure upload runs successfully.
+    - Ensure success upload message is printed.
+    - Ensure Skipped message is printed.
+    """
+    import demisto_sdk.commands.content_graph.objects.content_item as content_item
+
+    pack_path = Path(
+        DEMISTO_SDK_PATH,
+        "tests/test_files/content_repo_example/Packs/ExamplePack/Integrations",
+    )
+    mocker.patch.object(
+        content_item,
+        "CONTENT_PATH",
+        Path(DEMISTO_SDK_PATH, "tests/test_files/content_repo_example"),
+    )
+
+    for content_class in (
+        IncidentField,
+        Integration,
+        Playbook,
+        Script,
+    ):
+        mock_upload_method(mocker, content_class)
+
+    runner = CliRunner(mix_stderr=False)
+    mocker.patch.object(PackParser, "parse_ignored_errors", return_value={})
+    result = runner.invoke(
+        app, [UPLOAD_CMD, "-i", str(pack_path), "--insecure", "--marketplace", "xsoar"]
+    )
+    assert result.exit_code == 0
+    assert "SKIPPED UPLOADING DUE TO MARKETPLACE MISMATCH:" in result.output
+    assert "Upload Destination Marketplace" in result.output
+    assert "Content Marketplace(s)" in result.output
+    assert (
+        "integration-sample_event_collector.yml │ Integration │ xsoar                            │ marketplacev2"
+        in result.output
+    )
+    assert "Did you forget to specify the marketplace?" in result.output
+
+    assert (
+        "\n".join(
+            (
+                "SUCCESSFUL UPLOADS:",
+                "╒══════════════════════════════╤═════════════╤═════════════╤════════════════╕",
+                "│ NAME                         │ TYPE        │ PACK NAME   │ PACK VERSION   │",
+                "╞══════════════════════════════╪═════════════╪═════════════╪════════════════╡",
+                "│ integration-sample_packs.yml │ Integration │ ExamplePack │ 3.0.0          │",
+                "╘══════════════════════════════╧═════════════╧═════════════╧════════════════╛",
+            )
+        )
+        in result.output
     )
 
 
@@ -146,7 +208,9 @@ METADATA_NAMES = [
 ]
 
 
-def test_zipped_pack_upload_positive(repo, mocker, tmpdir, demisto_client_mock):
+def test_zipped_pack_upload_positive(
+    repo, mocker, tmpdir, demisto_client_mock, monkeypatch
+):
     """
     Given
     - content pack name
@@ -159,24 +223,33 @@ def test_zipped_pack_upload_positive(repo, mocker, tmpdir, demisto_client_mock):
     - Ensure success upload message is printed.
     - ensure yml / json content items inside the pack are getting unified.
     """
-    logger_info = mocker.patch.object(logging.getLogger("demisto-sdk"), "info")
+
     mocker.patch.object(
         API_CLIENT, "upload_content_packs", return_value=({}, 200, None)
     )
-    mocked_get_installed = mocker.patch.object(
-        API_CLIENT, "generic_request", return_value=({}, 200, None)
-    )
+    mocker.patch.object(API_CLIENT, "generic_request", return_value=({}, 200, None))
     mocker.patch.object(PackMetadata, "_get_tags_from_landing_page", retrun_value={})
     mocker.patch.object(Path, "cwd", return_value=Path.cwd())
 
     pack = repo.setup_one_pack(name="test-pack")
     runner = CliRunner(mix_stderr=False)
     with ChangeCWD(pack.repo_path):
-        result = runner.invoke(
-            main,
-            [UPLOAD_CMD, "-i", pack.path, "-z", "--insecure", "--keep-zip", tmpdir],
-        )
-        assert result.exit_code == SUCCESS_RETURN_CODE
+        with TemporaryDirectory() as artifact_dir:
+            monkeypatch.setenv("DEMISTO_SDK_CONTENT_PATH", artifact_dir)
+            monkeypatch.setenv("ARTIFACTS_FOLDER", artifact_dir)
+            result = runner.invoke(
+                app,
+                [
+                    UPLOAD_CMD,
+                    "-i",
+                    str(pack.path),
+                    "-z",
+                    "--insecure",
+                    "--keep-zip",
+                    tmpdir,
+                ],
+            )
+            assert result.exit_code == SUCCESS_RETURN_CODE
 
     with ZipFile(f"{tmpdir}/uploadable_packs.zip") as result_zip:
         with ZipFile(BytesIO(result_zip.read("test-pack.zip"))) as pack_zip:
@@ -255,20 +328,18 @@ def test_zipped_pack_upload_positive(repo, mocker, tmpdir, demisto_client_mock):
                         == METADATA_DISPLAYS[content_item]
                     )
 
-    logged = flatten_call_args(logger_info.call_args_list)
-    assert mocked_get_installed.called_once_with(
-        "/contentpacks/metadata/installed", "GET"
-    )
-    assert logged[-1] == "\n".join(
-        (
-            "[green]SUCCESSFUL UPLOADS:",
-            "╒═══════════╤════════╤═════════════╤════════════════╕",
-            "│ NAME      │ TYPE   │ PACK NAME   │ PACK VERSION   │",
-            "╞═══════════╪════════╪═════════════╪════════════════╡",
-            "│ test-pack │ Pack   │ test-pack   │ 1.0.0          │",
-            "╘═══════════╧════════╧═════════════╧════════════════╛",
-            "[/green]",
+    assert (
+        "\n".join(
+            (
+                "SUCCESSFUL UPLOADS:",
+                "╒═══════════╤════════╤═════════════╤════════════════╕",
+                "│ NAME      │ TYPE   │ PACK NAME   │ PACK VERSION   │",
+                "╞═══════════╪════════╪═════════════╪════════════════╡",
+                "│ test-pack │ Pack   │ test-pack   │ 1.0.0          │",
+                "╘═══════════╧════════╧═════════════╧════════════════╛",
+            )
         )
+        in result.output
     )
 
 
@@ -287,39 +358,19 @@ def test_integration_upload_path_does_not_exist(demisto_client_mock):
     invalid_dir_path = join(
         DEMISTO_SDK_PATH, "tests/test_files/content_repo_example/DoesNotExist"
     )
-    runner = CliRunner(mix_stderr=False)
-    result = runner.invoke(main, [UPLOAD_CMD, "-i", invalid_dir_path, "--insecure"])
-    assert result.exit_code == 2
-    assert isinstance(result.exception, SystemExit)
-    assert (
-        f"Invalid value for '-i' / '--input': Path '{invalid_dir_path}' does not exist"
-        in result.stderr
-    )
 
+    # Mock rich Console to avoid rich formatting during tests
+    with mock.patch.object(Console, "print", wraps=Console().print) as mock_print:
+        runner = CliRunner(mix_stderr=True)
+        result = runner.invoke(app, [UPLOAD_CMD, "-i", invalid_dir_path, "--insecure"])
 
-def test_integration_upload_script_invalid_path(demisto_client_mock, tmp_path, mocker):
-    """
-    Given
-    - Directory with invalid path - "Script" instead of "Scripts".
+        assert result.exit_code == 2
+        assert isinstance(result.exception, SystemExit)
 
-    When
-    - Uploading the script.
-
-    Then
-    - Ensure upload fails due to invalid path.
-    - Ensure failure upload message is printed.
-    """
-    logger_error = mocker.patch.object(logging.getLogger("demisto-sdk"), "error")
-    path = tmp_path / "Script" / "InvalidScript"
-    path.mkdir(parents=True)
-    runner = CliRunner(mix_stderr=False)
-
-    result = runner.invoke(main, [UPLOAD_CMD, "-i", str(path), "--insecure"])
-    logged_errors = flatten_call_args(logger_error.call_args_list)
-
-    assert result.exit_code == ERROR_RETURN_CODE
-    assert str(path) in logged_errors[0]
-    assert "Nothing to upload: the" in logged_errors[1]
+        # Check for error message in the output
+        assert "Invalid value for '--input' / '-i'" in result.stdout
+        assert "does not exist" in result.stdout
+        mock_print.assert_called()
 
 
 def test_integration_upload_pack_invalid_connection_params(mocker):
@@ -333,7 +384,6 @@ def test_integration_upload_pack_invalid_connection_params(mocker):
     Then
     - Ensure pack is not uploaded and correct error message is printed.
     """
-    logger_info = mocker.patch.object(logging.getLogger("demisto-sdk"), "info")
 
     pack_path = join(
         DEMISTO_SDK_PATH, "tests/test_files/content_repo_example/Packs/FeedAzure"
@@ -346,11 +396,11 @@ def test_integration_upload_pack_invalid_connection_params(mocker):
         return_value=Version("0"),
     )
     runner = CliRunner(mix_stderr=False)
-    result = runner.invoke(main, [UPLOAD_CMD, "-i", pack_path, "--insecure"])
+    result = runner.invoke(app, [UPLOAD_CMD, "-i", pack_path, "--insecure"])
     assert result.exit_code == 1
-    assert str_in_call_args_list(
-        logger_info.call_args_list,
-        "Could not connect to the server. Try checking your connection configurations.",
+    assert (
+        "Could not connect to the server. Try checking your connection configurations."
+        in result.output
     )
 
 
@@ -388,7 +438,7 @@ def test_upload_single_list(mocker, pack):
 
     with ChangeCWD(pack.repo_path):
         result = runner.invoke(
-            main,
+            app,
             [UPLOAD_CMD, "-i", _list_data.path],
         )
     assert result.exit_code == SUCCESS_RETURN_CODE
@@ -422,8 +472,6 @@ def test_upload_single_indicator_field(mocker, pack):
         },
     )
 
-    logger_info = mocker.patch.object(logging.getLogger("demisto-sdk"), "info")
-
     mocker.patch(
         "demisto_sdk.commands.upload.uploader.demisto_client", return_valure="object"
     )
@@ -439,8 +487,8 @@ def test_upload_single_indicator_field(mocker, pack):
 
     with ChangeCWD(pack.repo_path):
         result = runner.invoke(
-            main,
+            app,
             [UPLOAD_CMD, "-i", indicator_field.path],
         )
     assert result.exit_code == SUCCESS_RETURN_CODE
-    assert str_in_call_args_list(logger_info.call_args_list, "SUCCESSFUL UPLOADS")
+    assert "SUCCESSFUL UPLOADS" in result.output

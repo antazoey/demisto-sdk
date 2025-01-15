@@ -24,6 +24,7 @@ from demisto_sdk.commands.common.constants import (
     TYPE_PYTHON,
     DemistoException,
 )
+from demisto_sdk.commands.common.git_util import GitUtil
 from demisto_sdk.commands.common.logger import logger
 
 # Python2 requirements
@@ -110,7 +111,7 @@ def build_skipped_exit_code(
 
 
 def get_test_modules(
-    content_repo, is_external_repo: bool = is_external_repository()
+    content_repo: GitUtil, is_external_repo: bool = is_external_repository()
 ) -> Dict[Path, bytes]:
     """Get required test modules from content repository - {remote}/master
     1. Tests/demistomock/demistomock.py
@@ -147,7 +148,7 @@ def get_test_modules(
 
         for module in modules:
             try:
-                module_full_path = content_repo.working_dir / module  # type: ignore
+                module_full_path = content_repo.repo.working_dir / module  # type: ignore
                 logger.debug(f"read file {module_full_path}")
                 if module.match("*CommonServerPython.py"):
                     # Remove import of DemistoClassApiModule in CommonServerPython,
@@ -554,8 +555,8 @@ def generate_coverage_report(
                 return
             raise warning
         report_data.seek(0)
-        # avoid parsing % that may exist in the data
-        logger.info("%s", report_data.read())
+        # the `{}` formatting prevents failed parsing of `%` that may exist in the data
+        logger.info("{}", report_data.read())  # noqa: PLE1205 see https://github.com/astral-sh/ruff/issues/13390
 
     if html:
         html_dir = os.path.join(cov_dir, "html")

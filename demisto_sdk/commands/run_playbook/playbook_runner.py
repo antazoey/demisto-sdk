@@ -1,7 +1,12 @@
+import os
+
 from demisto_client.demisto_api.rest import ApiException
 
 from demisto_sdk.commands.common.clients import get_client_from_server_type
-from demisto_sdk.commands.common.constants import InvestigationPlaybookState
+from demisto_sdk.commands.common.constants import (
+    DEMISTO_BASE_URL,
+    InvestigationPlaybookState,
+)
 from demisto_sdk.commands.common.logger import logger
 
 
@@ -31,7 +36,9 @@ class PlaybookRunner:
         )  # we set to None so demisto_client will use env var DEMISTO_VERIFY_SSL
         # if url parameter is not provided, demisto_client will search the DEMISTO_BASE_URL env variable
 
-        self.instance_api_client = get_client_from_server_type(url, verify_ssl=verify)
+        self.instance_api_client = get_client_from_server_type(
+            url or os.getenv(DEMISTO_BASE_URL), verify_ssl=verify
+        )
 
     def run_playbook(self) -> int:
         """Run a playbook in Demisto.
@@ -52,7 +59,7 @@ class PlaybookRunner:
             return 1
 
         logger.info(
-            f"[green]The playbook: {self.playbook_id} was triggered successfully.[/green]"
+            f"<green>The playbook: {self.playbook_id} was triggered successfully.</green>"
         )
 
         incident_id = incident.id
@@ -85,16 +92,16 @@ class PlaybookRunner:
             playbook_state = playbook_state_raw_response.get("state")
             if playbook_state == InvestigationPlaybookState.FAILED:
                 logger.error(
-                    f"[red]The playbook finished running with status: {InvestigationPlaybookState.FAILED}"
+                    f"<red>The playbook finished running with status: {InvestigationPlaybookState.FAILED}"
                 )
             else:
                 logger.info(
-                    f"[green]The playbook {self.playbook_id} has completed its run successfully[/green]"
+                    f"<green>The playbook {self.playbook_id} has completed its run successfully</green>"
                 )
 
         else:
             logger.info(
-                f"[green]playbook execution results can be found in {work_plan_link}[/green]"
+                f"<green>playbook execution results can be found in {work_plan_link}</green>"
             )
 
         return 0

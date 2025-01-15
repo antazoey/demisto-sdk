@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import builtins
-import logging
 import os
 import shutil
 from io import TextIOWrapper
@@ -13,6 +12,8 @@ import pytest
 from urllib3.response import HTTPResponse
 
 from demisto_sdk.commands.common.constants import (
+    DEMISTO_BASE_URL,
+    DEMISTO_KEY,
     JOBS_DIR,
     LAYOUTS_DIR,
     LISTS_DIR,
@@ -23,14 +24,20 @@ from demisto_sdk.commands.common.handlers import DEFAULT_YAML_HANDLER as yaml
 from demisto_sdk.commands.common.tests.tools_test import SENTENCE_WITH_UMLAUTS
 from demisto_sdk.commands.common.tools import get_child_files
 from demisto_sdk.commands.download.downloader import *
-from TestSuite.test_tools import str_in_call_args_list
+from TestSuite.playbook import Playbook
 
 TESTS_DATA_FOLDER = Path(__file__).parent / "tests_data"
 TESTS_ENV_FOLDER = Path(__file__).parent / "tests_env"
 
-# Avoid missing environment variables errors
-os.environ["DEMISTO_BASE_URL"] = "https://fake-xsoar-server.com"
-os.environ["DEMISTO_API_KEY"] = "fake_api_key"
+
+@pytest.fixture(autouse=True)
+def set_env_vars():
+    # Avoid missing environment variables errors
+    os.environ[DEMISTO_BASE_URL] = "https://fake-xsoar-server.com"
+    os.environ[DEMISTO_KEY] = "fake_api_key"
+    yield
+    os.environ.pop(DEMISTO_BASE_URL, None)
+    os.environ.pop(DEMISTO_KEY, None)
 
 
 def load_test_data(file_name: str, folder: str | None = None) -> dict:
@@ -365,22 +372,19 @@ class TestHelperMethods:
 
 
 class TestFlags:
-    def test_missing_output_flag(self, mocker):
+    def test_missing_output_flag(self, caplog):
         """
         Given: A downloader object
         When: The user tries to download a system item without specifying the output flag
         Then: Ensure downloader returns a '1' error code and logs the error
         """
         downloader = Downloader(input=("test",))
-        logger_error = mocker.patch.object(logging.getLogger("demisto-sdk"), "error")
 
-        assert downloader.download() == 1
-        assert str_in_call_args_list(
-            logger_error.call_args_list,
-            "Error: Missing required parameter '-o' / '--output'.",
-        )
+        with pytest.raises(typer.Exit):
+            assert downloader.download() == 1
+        assert "Error: Missing required parameter '-o' / '--output'." in caplog.text
 
-    def test_missing_input_flag_system(self, mocker):
+    def test_missing_input_flag_system(self, mocker, caplog):
         """
         Given: A downloader object
         When: The user tries to download a system item without specifying any input flag
@@ -388,15 +392,15 @@ class TestFlags:
         """
         downloader = Downloader(output="Output", input=tuple(), system=True)
         mocker.patch.object(Downloader, "verify_output_path", return_value=True)
-        logger_info = mocker.patch.object(logging.getLogger("demisto-sdk"), "error")
 
-        assert downloader.download() == 1
-        assert str_in_call_args_list(
-            logger_info.call_args_list,
-            "Error: Missing required parameter for downloading system items: '-i' / '--input'.",
+        with pytest.raises(typer.Exit):
+            assert downloader.download() == 1
+        assert (
+            "Error: Missing required parameter for downloading system items: '-i' / '--input'."
+            in caplog.text
         )
 
-    def test_missing_input_flag_custom(self, mocker):
+    def test_missing_input_flag_custom(self, mocker, caplog):
         """
         Given: A downloader object
         When: The user tries to download a custom content item without specifying any input flag
@@ -410,15 +414,15 @@ class TestFlags:
             system=False,
         )
         mocker.patch.object(Downloader, "verify_output_path", return_value=True)
-        logger_info = mocker.patch.object(logging.getLogger("demisto-sdk"), "error")
 
-        assert downloader.download() == 1
-        assert str_in_call_args_list(
-            logger_info.call_args_list,
-            "Error: No input parameter has been provided ('-i' / '--input', '-r' / '--regex', '-a' / '--all).",
+        with pytest.raises(typer.Exit):
+            assert downloader.download() == 1
+        assert (
+            "Error: No input parameter has been provided ('-i' / '--input', '-r' / '--regex', '-a' / '--all)."
+            in caplog.text
         )
 
-    def test_missing_item_type(self, mocker):
+    def test_missing_item_type(self, mocker, caplog):
         """
         Given: A downloader object
         When: The user tries to download a system item without specifying the item type
@@ -428,12 +432,12 @@ class TestFlags:
             output="Output", input=("My Playbook",), system=True, item_type=None
         )
         mocker.patch.object(Downloader, "verify_output_path", return_value=True)
-        logger_info = mocker.patch.object(logging.getLogger("demisto-sdk"), "error")
 
-        assert downloader.download() == 1
-        assert str_in_call_args_list(
-            logger_info.call_args_list,
-            "Error: Missing required parameter for downloading system items: '-it' / '--item-type'.",
+        with pytest.raises(typer.Exit):
+            assert downloader.download() == 1
+        assert (
+            "Error: Missing required parameter for downloading system items: '-it' / '--item-type'."
+            in caplog.text
         )
 
     def test_all_flag(self, tmp_path, mocker):
@@ -679,6 +683,39 @@ class TestDownloadExistingFile:
         ) as code_file:
             code_data = code_file.read()
         assert "# TEST" in code_data
+
+    def test_download_and_format_existing_file(self, tmp_path):
+        """
+        Given: A remote Script with different comment.
+        When: Downloading with force=True and run_format=True.
+        Then: Assert the file is merged and the remote comment is formatted is in the new file.
+        """
+        env = Environment(tmp_path)
+        downloader = Downloader(force=True, run_format=True)
+        script_file_name = env.SCRIPT_CUSTOM_CONTENT_OBJECT["file_name"]
+        script_file_path = env.SCRIPT_INSTANCE_PATH / "TestScript.yml"
+
+        script_data = get_file_details(
+            file_content=env.SCRIPT_CUSTOM_CONTENT_OBJECT["file"].getvalue(),
+            full_file_path=str(env.CUSTOM_CONTENT_SCRIPT_PATH),
+        )
+
+        # The downloaded yml contains some other comment now.
+        script_data["comment"] = "some other comment."
+
+        env.SCRIPT_CUSTOM_CONTENT_OBJECT["data"] = script_data
+        with pytest.raises(typer.Exit):
+            assert downloader.write_files_into_output_path(
+                downloaded_content_objects={
+                    script_file_name: env.SCRIPT_CUSTOM_CONTENT_OBJECT
+                },
+                existing_pack_structure=env.PACK_CONTENT,
+                output_path=env.PACK_INSTANCE_PATH,
+            )
+        assert script_file_path.is_file()
+        data = get_yaml(script_file_path)
+        # Make sure the new comment is formatted and a '.' was added.
+        assert data["comment"] == "some other comment."
 
     def test_download_existing_no_force_skip(self, tmp_path):
         """
@@ -1155,12 +1192,101 @@ def test_uuids_replacement_in_content_items(mocker):
 
     changed_uuids_count = 0
     for file_object in all_custom_content_objects.values():
-        if downloader.replace_uuid_ids(
+        if downloader.replace_uuid_ids_for_item(
             custom_content_object=file_object, uuid_mapping=uuid_mapping
         ):
             changed_uuids_count += 1
 
     assert changed_uuids_count == 7
+
+
+@pytest.mark.parametrize("content_item_name", ("Test: Test", "[Test] Test"))
+def test_uuids_replacement_in_content_items_with_special_character_names(
+    repo, content_item_name: str, caplog
+):
+    """
+    Given: A YAML-based content item name that contains special YAML characters
+          (that requires wrapping the string quotes)
+    When: Calling 'self.replace_uuid_ids' method.
+    Then: Ensure that the UUIDs are replaced properly and that the update YAML file is valid.
+    """
+    caplog.set_level("WARNING")
+    repo = repo.create_pack()
+    playbook_data = {
+        "name": content_item_name,
+        "id": "d470522f-0a68-43c7-a62f-224f04b2e0c9",
+    }
+    playbook: Playbook = repo.create_playbook(yml=playbook_data)
+
+    downloader = Downloader(
+        all_custom_content=True,
+        auto_replace_uuids=True,
+    )
+
+    file_name = playbook.obj_path.name
+    file_object = downloader.create_content_item_object(
+        file_name=file_name,
+        file_data=StringIO(safe_read_unicode(playbook.obj_path.read_bytes())),
+        _loaded_data=playbook_data,
+    )
+    custom_content_objects = {file_name: file_object}
+
+    uuid_mapping = downloader.create_uuid_to_name_mapping(
+        custom_content_objects=custom_content_objects
+    )
+    downloader.replace_uuid_ids(
+        custom_content_objects=custom_content_objects, uuid_mapping=uuid_mapping
+    )
+    # Assert no warnings logged (error raised by 'get_file_details' in 'replace_uuid_ids_for_item' if YAML is invalid)
+    assert not caplog.records
+    # Assert ID value is always in quotes
+    assert f"id: '{file_object['name']}'" in file_object["file"].getvalue()
+
+
+@pytest.mark.parametrize("quote_type", ("'", '"'))
+def test_uuids_replacement_in_content_items_with_quoted_id_field(
+    repo, mocker, quote_type: str, caplog
+):
+    """
+    Given: A YAML-based content item, with the ID surrounded in quotes on the file
+    When: Calling 'self.replace_uuid_ids' method.
+    Then: Ensure that the replaced ID is properly surrounded by quotes and doesn't have duplicate quotes.
+    """
+    caplog.set_level("WARNING")
+    repo = repo.create_pack()
+    playbook_data = {"id": "d470522f-0a68-43c7-a62f-224f04b2e0c9", "name": "Test"}
+    playbook: Playbook = repo.create_playbook(yml=playbook_data)
+
+    with playbook.obj_path.open("w") as f:
+        f.write(
+            f"id: {quote_type}{playbook_data['id']}{quote_type}\nname: {playbook_data['name']}"
+        )
+
+    downloader = Downloader(
+        all_custom_content=True,
+        auto_replace_uuids=True,
+    )
+
+    file_name = playbook.obj_path.name
+    file_object = downloader.create_content_item_object(
+        file_name=file_name,
+        file_data=StringIO(safe_read_unicode(playbook.obj_path.read_bytes())),
+        _loaded_data=playbook_data,
+    )
+    custom_content_objects = {file_name: file_object}
+
+    uuid_mapping = downloader.create_uuid_to_name_mapping(
+        custom_content_objects=custom_content_objects
+    )
+    downloader.replace_uuid_ids(
+        custom_content_objects=custom_content_objects, uuid_mapping=uuid_mapping
+    )
+    # Assert no warnings logged (error raised by 'get_file_details' in 'replace_uuid_ids_for_item' if YAML is invalid)
+    assert not caplog.records
+    # Assert ID value is always in quotes
+    assert (
+        file_object["file"].getvalue().splitlines()[0] == f"id: '{file_object['name']}'"
+    )
 
 
 def test_get_system_playbooks(mocker):
@@ -1262,15 +1388,13 @@ def test_get_system_playbooks_non_api_failure(mocker):
     assert results == {}
 
 
-def test_get_system_playbooks_api_failure(mocker):
+def test_get_system_playbooks_api_failure(mocker, caplog):
     """
     Given: a mock exception
     When: calling get_system_playbooks function.
     Then: Ensure that when the API call throws an ApiException error and the id extraction fails,
           the function raises the same error.
     """
-    logger_error = mocker.patch.object(logging.getLogger("demisto-sdk"), "error")
-    logger_info = mocker.patch.object(logging.getLogger("demisto-sdk"), "info")
 
     mocker.patch.object(
         demisto_client,
@@ -1286,14 +1410,11 @@ def test_get_system_playbooks_api_failure(mocker):
     results = downloader.get_system_playbooks(content_items=["Test"])
 
     assert get_playbook_id_by_playbook_name_spy.call_count == 1
-    assert str_in_call_args_list(
-        call_args_list=logger_error.call_args_list,
-        required_str="Failed to fetch system playbook 'Test': (403)\nReason: Test Error Message\n",
+    assert (
+        "Failed to fetch system playbook 'Test': (403)\nReason: Test Error Message\n"
+        in caplog.text
     )
-    assert str_in_call_args_list(
-        call_args_list=logger_info.call_args_list,
-        required_str="No system playbooks were downloaded.",
-    )
+    assert "No system playbooks were downloaded." in caplog.text
     assert results == {}
 
 
@@ -1320,7 +1441,8 @@ def test_list_files_flag(mocker):
 
     list_file_method_mock = mocker.spy(downloader, "list_all_custom_content")
     content_table_mock = mocker.spy(downloader, "create_custom_content_table")
-    assert downloader.download() == 0
+    with pytest.raises(typer.Exit):
+        assert downloader.download() == 0
 
     expected_table = (
         "Content Name                Content Type\n"
@@ -1374,8 +1496,8 @@ def test_auto_replace_uuids_flag(mocker, auto_replace_uuids: bool):
     mocker.patch.object(downloader, "build_existing_pack_structure", return_value={})
     mocker.patch.object(downloader, "write_files_into_output_path", return_value=True)
     mock_replace_uuids = mocker.spy(downloader, "replace_uuid_ids")
-
-    downloader.download()
+    with pytest.raises(typer.Exit):
+        downloader.download()
 
     if auto_replace_uuids:
         assert mock_replace_uuids.called
@@ -1384,7 +1506,7 @@ def test_auto_replace_uuids_flag(mocker, auto_replace_uuids: bool):
         assert not mock_replace_uuids.called
 
 
-def test_invalid_regex_error(mocker):
+def test_invalid_regex_error(mocker, caplog):
     """
     Given: A regex that is not valid
     When: Calling the download command for custom content
@@ -1392,10 +1514,34 @@ def test_invalid_regex_error(mocker):
     """
     downloader = Downloader(regex="*invalid-regex*", output="fake_output_dir")
     mocker.patch.object(downloader, "verify_output_path", return_value=True)
-    logger_error = mocker.patch.object(logging.getLogger("demisto-sdk"), "error")
 
-    assert downloader.download() == 1
-    assert str_in_call_args_list(
-        logger_error.call_args_list,
-        "Error: Invalid regex pattern provided: '*invalid-regex*'.",
+    with pytest.raises(typer.Exit):
+        assert downloader.download() == 1
+    assert "Error: Invalid regex pattern provided: '*invalid-regex*'." in caplog.text
+
+
+def test_download_with_subplaybook(mocker):
+    """
+    Given: A downloader object.
+    When: Downloading a custom playbook with task of subplaybook.
+    Then: Ensure that "playbookId" attribute of the sub-playbook task is replaced with "playbookName" attribute
+    """
+    playbook_path = (
+        TESTS_DATA_FOLDER / "custom_content" / "playbook-task_with_sub-playbook.yml"
     )
+
+    filtered_custom_content_objects = {
+        "playbook-task_with_sub-playbook": {
+            "id": "1111-111-111",
+            "name": "task_with_sub-playbook",
+            "type": "playbook",
+            "data": get_yaml(playbook_path),
+        }
+    }
+    format_playbook_task(
+        filtered_custom_content_objects["playbook-task_with_sub-playbook"]
+    )
+    returned_playbookName_value = filtered_custom_content_objects[
+        "playbook-task_with_sub-playbook"
+    ]["data"]["tasks"]["1"]["task"]["playbookName"]
+    assert returned_playbookName_value == "test2"

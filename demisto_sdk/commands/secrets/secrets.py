@@ -125,12 +125,12 @@ class SecretsValidator:
         if self.prev_ver and not self.prev_ver.startswith(DEMISTO_GIT_UPSTREAM):
             self.prev_ver = f"{DEMISTO_GIT_UPSTREAM}/" + self.prev_ver
 
-    def get_secrets(self, branch_name, is_circle):
+    def get_secrets(self, commit, is_circle):
         secret_to_location_mapping = {}
         if self.input_paths:
             secrets_file_paths = self.input_paths
         else:
-            secrets_file_paths = self.get_all_diff_text_files(branch_name, is_circle)
+            secrets_file_paths = self.get_all_diff_text_files(commit, is_circle)
         # If a input path supplied, should not run on git. If not supplied make sure not in middle of merge.
         if not run_command("git rev-parse -q --verify MERGE_HEAD") or self.input_paths:
             secret_to_location_mapping = self.search_potential_secrets(
@@ -159,9 +159,9 @@ class SecretsValidator:
 
                 secrets_found_string += (
                     "For more information about whitelisting visit: "
-                    "https://xsoar.pan.dev/docs/concepts/demisto-sdk#secrets"
+                    "https://docs-cortex.paloaltonetworks.com/r/1/Demisto-SDK-Guide/secrets"
                 )
-                logger.info(f"[red]{secrets_found_string}[/red]")
+                logger.info(f"<red>{secrets_found_string}</red>")
         return secret_to_location_mapping
 
     def reformat_secrets_output(self, secrets_list):
@@ -172,7 +172,7 @@ class SecretsValidator:
         """
         return "\n".join(secrets_list) if secrets_list else ""
 
-    def get_all_diff_text_files(self, branch_name, is_circle):
+    def get_all_diff_text_files(self, commit, is_circle):
         """
         Get all new/modified text files that need to be searched for secrets
         :param branch_name: current branch being worked on
@@ -189,7 +189,7 @@ class SecretsValidator:
             logger.info(f"Running secrets validation against {prev_ver}")
 
             changed_files_string = run_command(
-                f"git diff --name-status {prev_ver}...{branch_name}"
+                f"git diff --name-status {prev_ver}...{commit}"
             )
         else:
             logger.info("Running secrets validation on all changes")
@@ -310,7 +310,6 @@ class SecretsValidator:
                             white_list_string.lower() in string_.lower()
                             for white_list_string in secrets_white_list
                         ):
-
                             entropy = self.calculate_shannon_entropy(string_)
                             if entropy >= ENTROPY_THRESHOLD:
                                 secret_to_location_mapping[file_path][
@@ -339,7 +338,7 @@ class SecretsValidator:
                 )
             except re.error as err:
                 error_string = f"Could not use secrets with item: {item}"
-                logger.info(f"[red]{error_string}[/red]")
+                logger.info(f"<red>{error_string}</red>")
                 raise re.error(error_string, str(err))
         return file_content
 
@@ -505,10 +504,10 @@ class SecretsValidator:
                     )
                     if not Path(white_list_line).is_file():
                         logger.info(
-                            f"[yellow]{white_list_line} not found.\n"
+                            f"<yellow>{white_list_line} not found.\n"
                             "please add the file name in the following format\n"
                             "file:[Scripts|Integrations|Playbooks]/name/file.example\n"
-                            "e.g. file:Scripts/HelloWorldScript/HelloWorldScript.py[/yellow]"
+                            "e.g. file:Scripts/HelloWorldScript/HelloWorldScript.py</yellow>"
                         )
                     files_white_list.append(white_list_line)
                 else:
@@ -568,7 +567,7 @@ class SecretsValidator:
                 return file_contents
         except Exception as ex:
             logger.info(
-                f"[red]Unable to parse the following file {file_path} due to error {ex}[/red]"
+                f"<red>Unable to parse the following file {file_path} due to error {ex}</red>"
             )
             raise
 
@@ -604,23 +603,22 @@ class SecretsValidator:
 
     @staticmethod
     @lru_cache()
-    def get_branch_name() -> str:
-        branches = run_command("git branch")
-        branch_name_reg = re.search(r"\* (.*)", branches)
-        if not branch_name_reg:
+    def get_current_commit() -> str:
+        commit = run_command("git rev-parse HEAD")
+        if not commit:
             return ""
-        return branch_name_reg.group(1)
+        return commit.strip()
 
     def find_secrets(self):
-        logger.info("[green]Starting secrets detection[/green]")
+        logger.info("<green>Starting secrets detection</green>")
         is_circle = self.is_circle
-        branch_name = self.get_branch_name()
-        secrets_found = self.get_secrets(branch_name, is_circle)
+        commit = self.get_current_commit()
+        secrets_found = self.get_secrets(commit, is_circle)
         if secrets_found:
             return True
         else:
             logger.info(
-                "[green]Finished validating secrets, no secrets were found.[/green]"
+                "<green>Finished validating secrets, no secrets were found.</green>"
             )
             return False
 

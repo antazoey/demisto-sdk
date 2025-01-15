@@ -6,68 +6,75 @@
 [![Ruff](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/charliermarsh/ruff/main/assets/badge/v1.json)](https://github.com/charliermarsh/ruff)
 [![Black](https://img.shields.io/badge/code%20style-black-000000.svg)](https://github.com/psf/black)
 
-The Demisto SDK library can be used to manage your Cortex XSOAR content with ease and efficiency.
-The library supports Python 3.8-3.10. _Python 3.8 support will be removed soon._
+The Demisto SDK is a Python library designed to aid the development process, both to validate entities being developed and to assist in the interaction between your development setup and Cortex XSOAR or Cortex XSIAM.
 
-In order to function properly, the Demisto SDK requires git to be installed. If git isn't installed, an appropriate message will be raised.
+Requirements:
+
+- Python 3.9, 3.10 or 3.11.
+- git installed.
+- A linux, mac or WSL2 machine.
+
+Windows machines are not supported - use WSL2 or run in a container instead.
 
 ## Usage
 
 ### Installation
 
-1. **Install** - `pip3 install demisto-sdk`
-2. **Upgrade** - `pip3 install --upgrade demisto-sdk`
-3. **Connect demisto-sdk with Cortex XSOAR server** - In order that demisto-sdk and Cortex XSOAR server communicate, perfrom the following steps:
+- **Install** - `pip3 install demisto-sdk`
+- **Upgrade** - `pip3 install --upgrade demisto-sdk`
 
-   1. Get an API key for Cortex XSOAR/XSIAM-server - `Settings` -> `Integrations` -> `API keys` -> `Get your Key` (copy it)
-   2. Set the following environment variables, or place an [.env file](https://pypi.org/project/python-dotenv/) at the root of the content pack:
+### Environment Variable Setup
+**Connect demisto-sdk with Cortex XSOAR server** - Some SDK commands require you to have an interaction with the Cortex XSOAR or Cortex XSIAM server. Examples of such interactions
+include uploading and downloading entities to or from XSOAR or XSIAM and running commands in the CLI.
 
-      ```bash
-      export DEMISTO_BASE_URL=<http or https>://<demisto-server url or ip>:<port>
-      export DEMISTO_API_KEY=<API key>
-      ```
-      To use on Cortex XSIAM or Cortex XSOAR 8.x the `XSIAM_AUTH_ID` environment variable should also be set.
-      ```bash
-      export XSIAM_AUTH_ID=<auth id>
-      ```
+To use these functions, Set the following environment variables, or place an [.env file](https://pypi.org/project/python-dotenv/) at the root of the content pack:
 
-      for example:
-      ```bash
-      export DEMISTO_BASE_URL=http://127.0.0.1:8080
-      export DEMISTO_API_KEY=XXXXXXXXXXXXXXXXXXXXXX
-      ```
-      As long as `XSIAM_AUTH_ID` environment variable is set, SDK commands will be configured to work with an XSIAM instance.
-      In order to set Demisto SDK to work with Cortex XSOAR instance, you need to delete the XSIAM_AUTH_ID parameter from your environment.
-      ```bash
-      unset XSIAM_AUTH_ID
-      ```
+#### For Cortex XSOAR 6.x Only
+ 1. Get your API key by going to the Cortex XSOAR server -> `Settings` -> `Integrations` -> `API Keys` -> `Get Your Key` -> Give your key a name and press `Generate Key`.
+ 2. Copy the given key.
+ 3. Add the following parameters to `~/.zshrc` and `~/.bash_profile`:
 
-      In case the primary git branch is not **master**, or the upstream is not named **origin**, set them with environment variables:
-      ```bash
-      export DEMISTO_DEFAULT_BRANCH = <branch name here>
-      export DEMISTO_DEFAULT_REMOTE = <upstream name here>
-      ```
+    ```bash
+    export DEMISTO_BASE_URL=<http or https>://<demisto-server url or ip>:<port>
+    export DEMISTO_API_KEY=<API key>
+    ```
 
-      >For more configurations, check the [demisto-py](https://github.com/demisto/demisto-py) repo (the SDK uses demisto-py to communicate with Cortex XSOAR).
+#### For Cortex XSIAM or Cortex XSOAR 8.x and above
+1. The base URL should be retrieved from the XSIAM instance by navigating to `Settings` -> `Configurations` -> `API Keys` -> clicking on the `Copy URL` button located at the top right corner of the page, and not the browser URL.
+2. The API key should be set to a Standard security level and must have the Instance Administrator role.
+3. The `XSIAM_AUTH_ID` environment variable needs to be set. Get it from the `ID` column of the created API Key.
+4. Add the following parameters to `~/.zshrc` and `~/.bash_profile`:
 
-   3. For the **Validate** and **Format** commands to work properly:
-     - Install node.js, and make sure `@mdx-js/mdx`, `fs-extra` and `commander` are installed in node-modules folder (`npm install ...`).
-     - Set the `DEMISTO_README_VALIDATION` environment variable to True.
+    ```bash
+    export DEMISTO_BASE_URL=<BASE_URL>
+    export DEMISTO_API_KEY=<API_KEY>
+    export XSIAM_AUTH_ID=<THE_XSIAM_AUTH_ID>
+    ```
+
+- Please note that once the `XSIAM_AUTH_ID` environment variable is set, the SDK commands will be configured to work with a Cortex XSIAM / XSOAR 8.x instance.
+In order to set Demisto SDK to work with a Cortex XSOAR 6.x instance, you need to delete the `XSIAM_AUTH_ID` parameter from your environment. To do this, please run the following command:
+    ```bash
+    unset XSIAM_AUTH_ID
+    ```
+
+
+- In case the primary git branch is not **master**, or the upstream is not named **origin**, set them with environment variables:
+    ```bash
+    export DEMISTO_DEFAULT_BRANCH = <branch name here>
+    export DEMISTO_DEFAULT_REMOTE = <upstream name here>
+    ```
+
+    > For more configurations, check the [demisto-py](https://github.com/demisto/demisto-py) repo (the SDK uses demisto-py to communicate with Cortex XSOAR).
+
+- For the **Validate** and **Format** commands to work properly:
+      - Install node.js, and make sure `@mdx-js/mdx`, `fs-extra` and `commander` are installed in node-modules folder (`npm install ...`).
+      - Set the `DEMISTO_README_VALIDATION` environment variable to True.
 
        MDX is used to validate markdown files, and make sure they render properly on XSOAR and [xsoar.pan.dev](https://xsoar.pan.dev).
 
-   4. Reload your terminal.
+- Reload your terminal.
 
 ---
-
-### Content path
-
-The **demisto-sdk** is made to work with Cortex content, structured similar to the [official Cortex content repo](https://github.com/demisto/content).
-
-Demisto-SDK commands work best when called from the content directory or any of its subfolders.
-To run Demisto-SDK commands from other folders, you may set the `DEMISTO_SDK_CONTENT_PATH` environment variable.
-
-We recommend running all demisto-SDK commands from a folder with a git repo, or any of its subfolders. To suppress warnings about running commands outside of a content repo folder, set the `DEMISTO_SDK_IGNORE_CONTENT_WARNING` environment variable.
 
 ### CLI usage
 
@@ -78,7 +85,17 @@ demisto-sdk <command> <args>
 ```
 
 For more information, run `demisto-sdk -h`.
+
 For more information on a specific command execute `demisto-sdk <command> -h`.
+
+### Content path
+
+The **demisto-sdk** is made to work with Cortex content, structured similar to the [official Cortex content repo](https://github.com/demisto/content).
+
+Demisto-SDK commands work best when called from the content directory or any of its subfolders.
+To run Demisto-SDK commands from other folders, you may set the `DEMISTO_SDK_CONTENT_PATH` environment variable.
+
+We recommend running all demisto-SDK commands from a folder with a git repo, or any of its subfolders. To suppress warnings about running commands outside a content repo folder, set the `DEMISTO_SDK_IGNORE_CONTENT_WARNING` environment variable.
 
 ### Version Check
 
@@ -88,6 +105,10 @@ For more information on a specific command execute `demisto-sdk <command> -h`.
 export DEMISTO_SDK_SKIP_VERSION_CHECK=yes
 ```
 
+### Run using Docker image
+
+You can run the Demisto-SDK using a docker image. For more details go to [Demisto-SDK Docker](./docs/create_command.md).
+
 ---
 
 ## Commands
@@ -96,7 +117,7 @@ Supported commands:
 
 1. [init](https://github.com/demisto/demisto-sdk/blob/master/demisto_sdk/commands/init/README.md)
 2. [Validate](https://github.com/demisto/demisto-sdk/blob/master/demisto_sdk/commands/validate/README.md)
-3. [Lint](https://github.com/demisto/demisto-sdk/blob/master/demisto_sdk/commands/lint/README.md)
+3. [Pre-Commit](https://github.com/demisto/demisto-sdk/blob/master/demisto_sdk/commands/pre_commit/README.md)
 4. [Secrets](https://github.com/demisto/demisto-sdk/blob/master/demisto_sdk/commands/secrets/README.md)
 5. [Prepare-Content](https://github.com/demisto/demisto-sdk/blob/master/demisto_sdk/commands/prepare_content/README.md#prepare-content)
 6. [Split](https://github.com/demisto/demisto-sdk/blob/master/demisto_sdk/commands/split/README.md)
@@ -115,9 +136,19 @@ Supported commands:
 19. [generate-integration](https://xsoar.pan.dev/docs/integrations/code-generator)
 20. [generate-yml-from-python](https://xsoar.pan.dev/docs/integrations/yml-from-python-code-gen)
 21. [generate-unit-tests](https://github.com/demisto/demisto-sdk/blob/master/demisto_sdk/commands/generate_unit_tests/README.md)
-22. [pre-commit (experimental)](https://github.com/demisto/demisto-sdk/blob/master/demisto_sdk/commands/pre_commit/README.md)
+22. [setup-env](https://github.com/demisto/demisto-sdk/blob/master/demisto_sdk/commands/setup_env/README.md)
+
 ---
-23. [setup-env](https://github.com/demisto/demisto-sdk/blob/master/demisto_sdk/commands/setup_env/README.md)
+
+### Logs
+
+Log files are generated and stored automatically by default in the user's home directory:  
+**Linux / macOS**: `$HOME/.demisto-sdk/logs`  
+**Windows**: `%USERPROFILE%\.demisto-sdk\logs`  
+
+The default directory can be overriden using the `--log-file-path` flag, or the `DEMISTO_SDK_LOG_FILE_PATH` environment variable.
+
+---
 
 ### Customizable command configuration
 
@@ -134,26 +165,19 @@ Note: Make sure to use the flag's full name and input `_` instead of a `-` if it
 
 Here are a few examples:
 
-- As a user, I would like to not use the `mypy` linter in my environment when using the `lint` command. In the `.demisto-sdk-conf` file I'll enter:
-
- ```INI
-[lint]
-no_mypy=true
-```
-
 - As a user, I would like to include untracked git files in my validation when running the `validate` command. In the `.demisto-sdk-conf` file I'll enter:
 
-```INI
-[validate]
-include_untracked=true
-```
+   ```INI
+   [validate]
+   include_untracked=true
+   ```
 
 - As a user, I would like to automatically use minor version changes when running the `update-release-notes` command. In the `.demisto-sdk-conf` file I'll enter:
 
-```INI
-[update-release-notes]
-update_type=minor
-```
+   ```INI
+   [update-release-notes]
+   update_type=minor
+   ```
 
 ---
 
@@ -163,7 +187,7 @@ MIT - See [LICENSE](LICENSE) for more information.
 
 ---
 
-## How to setup development environment?
+## How to setup a development environment?
 
 Follow the guide found [here](CONTRIBUTION.md#2-install-demisto-sdk-dev-environment) to setup your `demisto-sdk` dev environment.
 The development environment is connected to the branch you are currently using in the SDK repository.
@@ -184,14 +208,12 @@ An internet connection is required for the following commands to work properly:
 1. [Format](https://github.com/demisto/demisto-sdk/blob/master/demisto_sdk/commands/format/README.md)
 2. [Validate](https://github.com/demisto/demisto-sdk/blob/master/demisto_sdk/commands/validate/README.md)
 3. [Update-release-notes](https://github.com/demisto/demisto-sdk/blob/master/demisto_sdk/commands/update_release_notes/README.md)
+4. [Pre-commit](https://github.com/demisto/demisto-sdk/blob/master/demisto_sdk/commands/pre_commit/README.md)
 
-
-Note that the following commands may work partially without an internet connection:
-
-1. [Download](https://github.com/demisto/demisto-sdk/blob/master/demisto_sdk/commands/download/README.md) - will fail when using the '-fmt, --run-format' argument.
-2. [Lint](https://github.com/demisto/demisto-sdk/blob/master/demisto_sdk/commands/lint/README.md) - will fail when creating the image.
+Note that the [Download](https://github.com/demisto/demisto-sdk/blob/master/demisto_sdk/commands/download/README.md) command will work only partially without an internet connection, it will fail when using the '-fmt, --run-format' argument.
 
 - When working offline (or in an airgapped environment), set the `DEMISTO_SDK_OFFLINE_ENV` environment variable to `true`:
+
    ```bash
    export DEMISTO_SDK_OFFLINE_ENV=TRUE
    ```
@@ -200,5 +222,32 @@ Note that the following commands may work partially without an internet connecti
 
 ---
 
+## Docker Usage
+
+Docker is required to run certain commands.
+
+The following command requires Docker:
+
+1. [setup-env](https://github.com/demisto/demisto-sdk/blob/master/demisto_sdk/commands/setup_env/README.md)
+
+However, some commands can be executed partially without Docker:
+
+1. [Format](https://github.com/demisto/demisto-sdk/blob/master/demisto_sdk/commands/format/README.md) - To run without Docker, use the `--no-graph` flag.
+2. [Generate-docs](https://github.com/demisto/demisto-sdk/blob/master/demisto_sdk/commands/generate_docs/README.md) - To run without Docker, use the `--no-graph` flag.
+3. [Validate](https://github.com/demisto/demisto-sdk/blob/master/demisto_sdk/commands/validate/README.md) - To skip Docker validation, use the `--no-docker-checks` flag.
+4. [pre-commit](https://github.com/demisto/demisto-sdk/blob/master/demisto_sdk/commands/pre_commit/README.md) - To run without Docker hooks, use the `--no-docker` flag.
+
+---
+
 ## XSOAR CI/CD
+
 For information regarding XSOAR CI/CD, please see [this article](https://xsoar.pan.dev/docs/reference/packs/content-management)
+
+## Custom Container Registry
+
+By default, the `demisto-sdk` will use `dockerhub` as the container registry to pull the integrations and scripts docker image.
+In order configure a custom container registry, the following environment variables must be set:
+
+- `DEMISTO_SDK_CONTAINER_REGISTRY`: the URL of the container registry.
+- `DEMISTO_SDK_CR_USER`: the username to use in the container registry.
+- `DEMISTO_SDK_CR_PASSWORD`: the password to use in the container registry.

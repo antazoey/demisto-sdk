@@ -162,7 +162,7 @@ def update_pack_metadata_with_dependencies(
 
     if not found_path_results:
         logger.info(
-            f"[red]{pack_folder_name} {constants.PACKS_PACK_META_FILE_NAME} was not found[/red]"
+            f"<red>{pack_folder_name} {constants.PACKS_PACK_META_FILE_NAME} was not found</red>"
         )
         sys.exit(1)
 
@@ -2305,10 +2305,10 @@ class PackDependencies:
 
         if not sum(pack_items.values(), []):
             logger.info(
-                f"[yellow]Couldn't find any items for pack '{pack_id}'. Please make sure:\n"
+                f"<yellow>Couldn't find any items for pack '{pack_id}'. Please make sure:\n"
                 f"1 - The spelling is correct.\n"
                 f"2 - The id_set.json file is up to date. Delete the file by running: `rm -rf "
-                f"Tests/id_set.json` and rerun the command.[/yellow]"
+                f"Tests/id_set.json` and rerun the command.</yellow>"
             )
 
         return pack_items
@@ -2672,9 +2672,9 @@ class PackDependencies:
                 f"\nPack {pack} and its dependencies were successfully added to the dependencies graph."
             )
             dependency_graph.nodes()[pack]["depending_on_packs"] = list(dependencies)
-            dependency_graph.nodes()[pack][
-                "depending_on_items_mandatorily"
-            ] = dependencies_items
+            dependency_graph.nodes()[pack]["depending_on_items_mandatorily"] = (
+                dependencies_items
+            )
 
         return dependency_graph
 
@@ -2755,14 +2755,14 @@ class PackDependencies:
     ):
         if output_path and not all_packs_dependencies and not get_dependent_on:
             logger.info(
-                "[yellow]You used the '--output-path' argument, which only works when using either the"
-                " '--all-packs-dependencies' or '--get-dependent-on' flags. Ignoring this argument.[/yellow]"
+                "<yellow>You used the '--output-path' argument, which only works when using either the"
+                " '--all-packs-dependencies' or '--get-dependent-on' flags. Ignoring this argument.</yellow>"
             )
         if not input_paths:
             if not all_packs_dependencies:
                 logger.info(
-                    "[red]Please provide an input path. The path should be formatted as 'Packs/<some pack name>'. "
-                    "For example, Packs/HelloWorld.[/red]"
+                    "<red>Please provide an input path. The path should be formatted as 'Packs/<some pack name>'. "
+                    "For example, Packs/HelloWorld.</red>"
                 )
                 sys.exit(1)
 
@@ -2771,34 +2771,34 @@ class PackDependencies:
 
             if input_paths and all_packs_dependencies:
                 logger.info(
-                    "[yellow]You used the '--input/-i' argument, which is not relevant for when using the"
-                    " '--all-packs-dependencies'. Ignoring this argument.[/yellow]"
+                    "<yellow>You used the '--input/-i' argument, which is not relevant for when using the"
+                    " '--all-packs-dependencies'. Ignoring this argument.</yellow>"
                 )
                 return
 
             elif len(input_paths) > 1 and not get_dependent_on:
                 logger.info(
-                    "[red]Please supply only one pack path to calculate its dependencies. Multiple inputs in only "
-                    "supported when using the --get-dependent-on flag.[/red]"
+                    "<red>Please supply only one pack path to calculate its dependencies. Multiple inputs in only "
+                    "supported when using the --get-dependent-on flag.</red>"
                 )
                 sys.exit(1)
 
             for path in input_paths:
                 if len(path.parts) != 2 or path.parts[-2] != "Packs":
                     logger.info(
-                        f"[red]Input path ({path}) must be formatted as 'Packs/<some pack name>'. "
-                        f"For example, Packs/HelloWorld.[/red]"
+                        f"<red>Input path ({path}) must be formatted as 'Packs/<some pack name>'. "
+                        f"For example, Packs/HelloWorld.</red>"
                     )
                     sys.exit(1)
                 if get_dependent_on:
                     if path.parts[-1] in IGNORED_PACKS_IN_DEPENDENCY_CALC:
                         logger.info(
-                            f"[red]Finding all packs dependent on {path.parts[-1]} pack is not supported.[/red]"
+                            f"<red>Finding all packs dependent on {path.parts[-1]} pack is not supported.</red>"
                         )
                         sys.exit(1)
         if all_packs_dependencies and not output_path:
             logger.info(
-                "[red]Please insert path for the generated output using --output-path[/red]"
+                "<red>Please insert path for the generated output using --output-path</red>"
             )
             sys.exit(1)
 
@@ -2833,11 +2833,13 @@ class PackDependencies:
 
         if get_dependent_on:
             dependent_packs, _ = get_packs_dependent_on_given_packs(
-                input_paths, id_set_path, output_path  # type: ignore[arg-type]
+                input_paths,  # type: ignore[arg-type]
+                id_set_path,
+                output_path,
             )
-            logger.info("[green]Found the following dependent packs:[/green]")
+            logger.info("<green>Found the following dependent packs:</green>")
             dependent_packs = json.dumps(dependent_packs, indent=4)
-            logger.info(f"[bold]{dependent_packs}[/bold]")
+            logger.info(f"<bold>{dependent_packs}</bold>")
 
         elif dependency:
             input_pack_name = ""
@@ -2849,19 +2851,19 @@ class PackDependencies:
             )
             if dependencies:
                 logger.info(
-                    f'[green]The pack "{input_pack_name}" depends on "{dependency_pack_name}" '
-                    f"with the following items:[/green]"
+                    f'<green>The pack "{input_pack_name}" depends on "{dependency_pack_name}" '
+                    f"with the following items:</green>"
                 )
-                logger.info(f"[bold]{dependencies}[/bold]")
+                logger.info(f"<bold>{dependencies}</bold>")
             else:
                 logger.info(
-                    f"[yellow]Could not find dependencies between the two packs: {input_pack_name} and {dependency}[/yellow]"
+                    f"<yellow>Could not find dependencies between the two packs: {input_pack_name} and {dependency}</yellow>"
                 )
 
         elif all_packs_dependencies:
             calculate_all_packs_dependencies(id_set_path, output_path)  # type: ignore[arg-type]
             logger.info(
-                f"[green]The packs dependencies json was successfully saved to {output_path}[/green]"
+                f"<green>The packs dependencies json was successfully saved to {output_path}</green>"
             )
 
         else:
@@ -2912,7 +2914,7 @@ class PackDependencies:
 
         if is_external_repository():
             logger.info(
-                "[yellow]Running in a private repository, will download the id set from official content[/yellow]"
+                "<yellow>Running in a private repository, will download the id set from official content</yellow>"
             )
             id_set = get_merged_official_and_local_id_set(
                 id_set, silent_mode=silent_mode
@@ -2939,9 +2941,9 @@ class PackDependencies:
             update_pack_metadata_with_dependencies(pack_name, first_level_dependencies)
 
         # print the found pack dependency results
-        logger.info(f"[bold]Found dependencies result for {pack_name} pack:[/bold]")
+        logger.info(f"<bold>Found dependencies result for {pack_name} pack:</bold>")
         dependency_result = json.dumps(first_level_dependencies, indent=4)
-        logger.info(f"[bold]{dependency_result}[/bold]")
+        logger.info(f"<bold>{dependency_result}</bold>")
 
         return first_level_dependencies
 
@@ -3024,7 +3026,7 @@ def calculate_single_pack_depends_on(
                                 (item, dep_item)
                             ]  # type:ignore
     except Exception as e:
-        logger.info(f"[red]Failed calculating {pack} pack dependencies: {e}[/red]")
+        logger.info(f"<red>Failed calculating {pack} pack dependencies: {e}</red>")
         raise
 
     return first_level_dependencies, pack
@@ -3073,7 +3075,7 @@ def calculate_single_pack_dependencies(
             subgraph, pack
         )
     except Exception:
-        logger.info(f"[red]Failed calculating {pack} pack dependencies[/red]")
+        logger.info(f"<red>Failed calculating {pack} pack dependencies</red>")
         raise
 
     return first_level_dependencies, all_level_dependencies, pack
@@ -3096,7 +3098,7 @@ def get_all_packs_dependency_graph(id_set: dict, packs: list) -> Iterable:
     )
     return dependency_graph
     # except Exception as e:
-    #     logger.info(f"[red]Failed calculating dependencies graph: {e}[/red]")
+    #     logger.info(f"<red>Failed calculating dependencies graph: {e}</red>")
     #     exit(2)
 
 
@@ -3110,7 +3112,7 @@ def select_packs_for_calculation() -> list:
     for pack in os.scandir(PACKS_FULL_PATH):
         if not pack.is_dir() or pack.name in IGNORED_PACKS_IN_DEPENDENCY_CALC:
             logger.info(
-                f"[yellow]Skipping dependency calculation of {pack.name} pack.[/yellow]"
+                f"<yellow>Skipping dependency calculation of {pack.name} pack.</yellow>"
             )
             continue  # skipping ignored packs
         packs.append(pack.name)
@@ -3146,7 +3148,7 @@ def calculate_all_packs_dependencies(id_set_path: str, output_path: str) -> dict
                 "fullPath": os.path.abspath(os.path.join(PACKS_DIR, pack_name)),
             }
         except Exception:
-            logger.info("[red]Failed to collect pack dependencies results[/red]")
+            logger.info("<red>Failed to collect pack dependencies results</red>")
             raise
 
     pack_dependencies_result: dict = {}
@@ -3170,7 +3172,7 @@ def calculate_all_packs_dependencies(id_set_path: str, output_path: str) -> dict
             f"Number of created pack dependencies entries: {len(pack_dependencies_result.keys())}"
         )
         # finished iteration over pack folders
-        logger.info("[green]Finished dependencies calculation[/green]")
+        logger.info("<green>Finished dependencies calculation</green>")
 
         with open(output_path, "w") as pack_dependencies_file:
             json.dump(pack_dependencies_result, pack_dependencies_file, indent=4)
@@ -3212,7 +3214,7 @@ def get_packs_dependent_on_given_packs(
 
         except Exception:
             logger.info(
-                "[red]Failed to collect the packs dependent on given packs[/red]"
+                "<red>Failed to collect the packs dependent on given packs</red>"
             )
             raise
 
@@ -3239,7 +3241,7 @@ def get_packs_dependent_on_given_packs(
         wait_futures_complete(futures=futures, done_fn=collect_dependent_packs)
         # finished iteration over pack folders
         logger.info(
-            "[green]Finished calculating the dependencies on the given packs.[/green]"
+            "<green>Finished calculating the dependencies on the given packs.</green>"
         )
 
         if output_path:
@@ -3263,7 +3265,9 @@ def find_dependencies_between_two_packs(
         dependency: The pack to search the dependency for.
     """
     dependent_packs, _ = get_packs_dependent_on_given_packs(
-        [dependency], id_set_path, output_path  # type: ignore[arg-type]
+        [dependency],
+        id_set_path,
+        output_path,  # type: ignore[arg-type]
     )
     input_pack_name = ""
     if input_paths:
@@ -3353,7 +3357,7 @@ def remove_dependencies_from_id_set(
     save_dict_of_sets("items_removed_manually_from_id_set.json", excluded_items_by_pack)
 
     logger.info(
-        "[green]Starting to remove dependencies of excluded items from id_set[/green]"
+        "<green>Starting to remove dependencies of excluded items from id_set</green>"
     )
 
     unfiltered_id_set = get_id_set(
@@ -3367,7 +3371,7 @@ def remove_dependencies_from_id_set(
         )
         if additional_items_to_exclude:
             logger.info(
-                f"[green]Adding the following packs to the exclusion list: {list(additional_items_to_exclude.keys())}[/green]"
+                f"<green>Adding the following packs to the exclusion list: {list(additional_items_to_exclude.keys())}</green>"
             )
             update_excluded_items_dict(
                 excluded_items_by_pack,
@@ -3475,9 +3479,9 @@ def convert_entity_types_to_id_set_headers(excluded_items_by_type: dict):
 
     for key in entity_type_to_header:
         if key in excluded_items_by_type:
-            excluded_items_by_type[
-                entity_type_to_header[key]
-            ] = excluded_items_by_type.pop(key)
+            excluded_items_by_type[entity_type_to_header[key]] = (
+                excluded_items_by_type.pop(key)
+            )
 
 
 def remove_items_from_packs_section(id_set: dict, excluded_items_by_pack: dict) -> None:
@@ -3501,7 +3505,9 @@ def remove_items_from_packs_section(id_set: dict, excluded_items_by_pack: dict) 
             item_type = item_type_to_content_items_header(item_type)
             try:
                 pack_content_items.get(item_type, []).remove(item_name)
-            except ValueError:  # This content item has already been excluded from the id_set
+            except (
+                ValueError
+            ):  # This content item has already been excluded from the id_set
                 pass
 
         # if no content items left, remove the pack from the id_set

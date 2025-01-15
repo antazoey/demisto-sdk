@@ -1,17 +1,21 @@
 import gzip
 import os
 from abc import ABC, abstractmethod
+from functools import lru_cache
 from pathlib import Path
 from pprint import pformat
 from typing import Any, Dict, List, Optional
 from urllib.parse import urljoin
 
 import requests
+from packaging.version import Version
 from pydantic import BaseModel, Field, HttpUrl, SecretStr, validator
 from pydantic.fields import ModelField
+from requests.exceptions import ConnectionError, Timeout
 
 from demisto_sdk.commands.common.handlers import JSON_Handler
 from demisto_sdk.commands.common.logger import logger
+from demisto_sdk.commands.common.tools import retry
 
 json = JSON_Handler()
 
@@ -126,6 +130,21 @@ class XsiamApiClient(XsiamApiInterface):
     def _session(self, value: requests.Session):
         self.__session = value
 
+    @lru_cache
+    @retry(times=5, exceptions=(RuntimeError, ConnectionError, Timeout))
+    def get_demisto_version(self) -> Version:
+        endpoint = urljoin(self.base_url, "xsoar/about")
+        response = self._session.get(endpoint)
+        response.raise_for_status()
+        data = response.json()
+        demisto_version = data.get("demistoVersion")
+        if not demisto_version:
+            raise RuntimeError("Could not get the tenant's demisto version")
+        logger.info(
+            f"<green>Demisto version of XSIAM tenant is {demisto_version}</green>",
+        )
+        return Version(demisto_version)
+
     @property
     def installed_packs(self) -> List[Dict[str, Any]]:
         endpoint = urljoin(self.base_url, "xsoar/contentpacks/metadata/installed")
@@ -219,9 +238,11 @@ class XsiamApiClient(XsiamApiInterface):
             endpoint = urljoin(self.base_url, "logs/v1/event")
             additional_headers = {
                 "authorization": self.collector_token,
-                "content-type": "application/json"
-                if data_format.casefold == "json"
-                else "text/plain",
+                "content-type": (
+                    "application/json"
+                    if data_format.casefold == "json"
+                    else "text/plain"
+                ),
                 "content-encoding": "gzip",
             }
             token_type = "collector_token"
@@ -250,7 +271,7 @@ class XsiamApiClient(XsiamApiInterface):
     def start_xql_query(self, query: str):
         body = {"request_data": {"query": query}}
         endpoint = urljoin(self.base_url, "public_api/v1/xql/start_xql_query/")
-        logger.info(f"Starting xql query:\nendpoint={endpoint}\n{query=}")
+        logger.info("{}", f"Starting xql query:\nendpoint={endpoint}\n{query=}")  # noqa: PLE1205
         response = self._session.post(endpoint, json=body)
         logger.debug("Request completed to start xql query")
         data = response.json()
@@ -272,11 +293,11 @@ class XsiamApiClient(XsiamApiInterface):
             }
         )
         endpoint = urljoin(self.base_url, "public_api/v1/xql/get_query_results/")
-        logger.info(f"Getting xql query results: endpoint={endpoint}")
+        logger.info("{}", f"Getting xql query results: endpoint={endpoint}")  # noqa: PLE1205
         response = self._session.post(endpoint, data=payload, timeout=timeout)
         logger.debug("Request completed to get xql query results")
         data = response.json()
-        logger.debug(pformat(data))
+        logger.debug("{}", pformat(data))  # noqa: PLE1205
 
         if (
             response.status_code in range(200, 300)

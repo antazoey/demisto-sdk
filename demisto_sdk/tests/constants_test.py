@@ -165,6 +165,9 @@ INVALID_MULTI_LINE_1_CHANGELOG_PATH = (
 INVALID_MULTI_LINE_2_CHANGELOG_PATH = (
     f"{GIT_ROOT}/demisto_sdk/tests/test_files/invalid-multi-line_2_CHANGELOG.md"
 )
+VALID_PRE_PROCESSING_RULE_PATH = (
+    f"{GIT_ROOT}/demisto_sdk/tests/test_files/preprocessrule-test_rule.json"
+)
 PACK_TARGET = "Packs/TestPack"
 LAYOUT_TARGET = f"{PACK_TARGET}/Layouts/layout-mock.json"
 LAYOUTS_CONTAINER_TARGET = f"{PACK_TARGET}/Layouts/layoutscontainer-mock.json"
@@ -474,9 +477,6 @@ INTEGRATION_PATH = "Integrations"
 INTEGRATION_SCHEMA_PATH = (
     f"{GIT_ROOT}/demisto_sdk/commands/common/schemas/integration.yml"
 )
-CONNECTION_SCHEMA_PATH = (
-    f"{GIT_ROOT}/demisto_sdk/commands/common/schemas/canvas-context-connections.yml"
-)
 VALID_GENERIC_TYPE_PATH = (
     f"{GIT_ROOT}/demisto_sdk/tests/test_files/generic-type-valid.json"
 )
@@ -520,7 +520,6 @@ DIR_LIST = [
     f"{PACK_TARGET}/{constants.LAYOUTS_DIR}",
     f"{PACK_TARGET}/{constants.CLASSIFIERS_DIR}",
     f"{PACK_TARGET}/{constants.INDICATOR_TYPES_DIR}",
-    f"{PACK_TARGET}/{constants.CONNECTIONS_DIR}",
     f"{PACK_TARGET}/{constants.INDICATOR_FIELDS_DIR}",
     f"{PACK_TARGET}/{constants.XSIAM_DASHBOARDS_DIR}",
     f"{PACK_TARGET}/{constants.CORRELATION_RULES_DIR}",

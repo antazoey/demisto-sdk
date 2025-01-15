@@ -49,7 +49,7 @@ class PlaybookValidator(ContentEntityValidator):
         """
         if "TestPlaybooks" in self.file_path:
             logger.info(
-                f"[yellow]Skipping validation for Test Playbook {self.file_path}[/yellow]"
+                f"<yellow>Skipping validation for Test Playbook {self.file_path}</yellow>"
             )
             return True
         playbook_checks = [
@@ -480,12 +480,10 @@ class PlaybookValidator(ContentEntityValidator):
         orphan_tasks = tasks_bucket.difference(next_tasks_bucket)
         if orphan_tasks:
             error_message, error_code = Errors.playbook_unconnected_tasks(orphan_tasks)
-            if not self.handle_error(
-                error_message, error_code, file_path=self.file_path
-            ):
+            if self.handle_error(error_message, error_code, file_path=self.file_path):
                 return False
 
-        return tasks_bucket.issubset(next_tasks_bucket)
+        return True
 
     @error_codes("PB104")
     def is_valid_as_deprecated(self) -> bool:
@@ -563,7 +561,7 @@ class PlaybookValidator(ContentEntityValidator):
 
         if not id_set_file:
             logger.info(
-                "[yellow]Skipping playbook script id validation. Could not read id_set.json.[/yellow]"
+                "<yellow>Skipping playbook script id validation. Could not read id_set.json.</yellow>"
             )
             return True
 

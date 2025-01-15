@@ -160,7 +160,6 @@ def report_time_measurements(
             )
     timers = registered_timers.get(group_name)
     if timers:
-
         method_states = [
             [
                 func.__qualname__,
@@ -206,9 +205,9 @@ def write_measure_to_logger(
     """
     sentence = f"Time measurements stat for {name}"
     output_msg = (
-        f"\n[cyan]{'#' * len(sentence)}\n"
+        f"\n<cyan>{'#' * len(sentence)}\n"
         f"{sentence}\n"
-        f"{'#' * len(sentence)}[/cyan]\n"
+        f"{'#' * len(sentence)}</cyan>\n"
     )
     stat_info_table = tabulate(csv_data, headers=MEASURE_TYPE_TO_HEADERS[measure_type])
     output_msg += stat_info_table

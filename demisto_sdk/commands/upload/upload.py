@@ -1,4 +1,3 @@
-import logging
 import shutil
 import tempfile
 from contextlib import suppress
@@ -6,11 +5,13 @@ from pathlib import Path
 from typing import Iterable, List, Sequence
 from zipfile import ZipFile
 
+import typer
 from pydantic import DirectoryPath
 
 from demisto_sdk.commands.common.constants import (
     MarketplaceVersions,
 )
+from demisto_sdk.commands.common.logger import logger
 from demisto_sdk.commands.common.tools import (
     parse_marketplace_kwargs,
     parse_multiple_path_inputs,
@@ -26,9 +27,7 @@ from demisto_sdk.commands.upload.uploader import (
     ERROR_RETURN_CODE,
     SUCCESS_RETURN_CODE,
 )
-from demisto_sdk.utils.utils import check_configuration_file
-
-logger = logging.getLogger("demisto-sdk")
+from demisto_sdk.utils.utils import update_command_args_from_config_file
 
 
 def upload_content_entity(**kwargs):
@@ -43,7 +42,9 @@ def upload_content_entity(**kwargs):
     if config_file_path := kwargs.pop("input_config_file", None):
         logger.info("Uploading files from config file")
         if input_ := kwargs.get("input"):
-            logger.warning(f"[orange]The input ({input_}) will NOT be used[/orange]")
+            logger.warning(
+                f"<fg #FFA500>The input ({input_}) will NOT be used</fg #FFA500>"
+            )
 
         paths = ConfigFileParser(Path(config_file_path)).custom_packs_paths
 
@@ -61,11 +62,11 @@ def upload_content_entity(**kwargs):
                 [Path(destination_zip_path, MULTIPLE_ZIPPED_PACKS_FILE_NAME)]
             )
 
-    check_configuration_file("upload", kwargs)
+    update_command_args_from_config_file("upload", kwargs)
 
     if not inputs:
-        logger.error("[red]No input provided for uploading[/red]")
-        return ERROR_RETURN_CODE
+        logger.error("<red>No input provided for uploading</red>")
+        raise typer.Exit(ERROR_RETURN_CODE)
 
     kwargs.pop("input")
     # Here the magic happens
@@ -86,7 +87,7 @@ def upload_content_entity(**kwargs):
     if not keep_zip:
         shutil.rmtree(destination_zip_path, ignore_errors=True)
 
-    return upload_result
+    raise typer.Exit(upload_result)
 
 
 def zip_multiple_packs(
@@ -99,7 +100,7 @@ def zip_multiple_packs(
 
     for path in paths:
         if not path.exists():
-            logger.error(f"[red]{path} does not exist, skipping[/red]")
+            logger.error(f"<red>{path} does not exist, skipping</red>")
             continue
 
         if path.is_file() and path.suffix == ".zip":
@@ -110,7 +111,7 @@ def zip_multiple_packs(
         with suppress(Exception):
             pack = BaseContent.from_path(path)
         if (pack is None) or (not isinstance(pack, Pack)):
-            logger.error(f"[red]could not parse pack from {path}, skipping[/red]")
+            logger.error(f"<red>could not parse pack from {path}, skipping</red>")
             continue
         packs.append(pack)
 

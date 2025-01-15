@@ -1,7 +1,7 @@
 import traceback
 from io import StringIO
 from pathlib import Path
-from typing import List
+from typing import List, Optional
 
 import typer
 
@@ -20,7 +20,11 @@ app = typer.Typer()
 
 @app.command(
     no_args_is_help=True,
-    context_settings={"allow_extra_args": True, "ignore_unknown_options": True},
+    context_settings={
+        "allow_extra_args": True,
+        "ignore_unknown_options": True,
+        "help_option_names": ["-h", "--help"],
+    },
 )
 def init_test_data(
     ctx: typer.Context,
@@ -47,28 +51,29 @@ def init_test_data(
         "INFO",
         "-clt",
         "--console-log-threshold",
-        help=("Minimum logging threshold for the console logger."),
+        help="Minimum logging threshold for the console logger.",
     ),
     file_log_threshold: str = typer.Option(
         "DEBUG",
         "-flt",
         "--file-log-threshold",
-        help=("Minimum logging threshold for the file logger."),
+        help="Minimum logging threshold for the file logger.",
     ),
-    log_file_path: str = typer.Option(
-        "demisto_sdk_debug.log",
+    log_file_path: Optional[str] = typer.Option(
+        None,
         "-lp",
         "--log-file-path",
-        help=("Path to the log file. Default: ./demisto_sdk_debug.log."),
+        help="Path to save log files onto.",
     ),
 ):
     """
     Initialize or update a test data file for a modeling rule
     """
     logging_setup(
-        console_log_threshold=console_log_threshold,
-        file_log_threshold=file_log_threshold,
-        log_file_path=log_file_path,
+        console_threshold=console_log_threshold,
+        file_threshold=file_log_threshold,
+        path=log_file_path,
+        calling_function=__name__,
     )
     handle_deprecated_args(ctx.args)
 
@@ -83,8 +88,7 @@ def init_test_data(
             if test_data_file:
                 operation_mode = "update"
                 logger.info(
-                    f"[cyan]Updating test data file: {test_data_file}[/cyan]",
-                    extra={"markup": True},
+                    f"<cyan>Updating test data file: {test_data_file}</cyan>",
                 )
                 test_data = TestData.parse_file(test_data_file)
                 dataset_to_fields_map = {
@@ -110,8 +114,7 @@ def init_test_data(
                     ).copy()
                     if not new_mapping:
                         logger.error(
-                            f"[red]Ignoring update the event log {event_log.test_data_event_id} as no dataset is provided for it[/red]",
-                            extra={"markup": True},
+                            f"<red>Ignoring update the event log {event_log.test_data_event_id} as no dataset is provided for it</red>",
                         )
                         continue
                     # update existing values and remove fields from expected_values that are no longer in the rule
@@ -149,8 +152,7 @@ def init_test_data(
                         )
             else:
                 logger.info(
-                    f"[cyan]Creating test data file for: {mr_entity.path.parent}[/cyan]",
-                    extra={"markup": True},
+                    f"<cyan>Creating test data file for: {mr_entity.path.parent}</cyan>",
                 )
                 data: List[TestData] = []
                 for mr in mr_entity.rules:
@@ -172,13 +174,14 @@ def init_test_data(
                 )
             test_data_file.write_text(test_data.json(indent=4))
             logger.info(
-                f"[green]Successfully {operation_mode}d {test_data_file}[/green]",
-                extra={"markup": True},
+                f"<green>Successfully {operation_mode}d {test_data_file}</green>",
             )
         except Exception:
             with StringIO() as sio:
                 traceback.print_exc(file=sio)
-                logger.error(f"[red]{sio.getvalue()}[/red]", extra={"markup": True})
+                logger.error(
+                    f"<red>{sio.getvalue()}</red>",
+                )
             errors = True
     if errors:
         raise typer.Exit(1)

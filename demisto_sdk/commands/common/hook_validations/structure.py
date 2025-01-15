@@ -2,7 +2,7 @@
 
 Module contains validation of schemas, ids and paths.
 """
-import logging
+
 import os
 import re
 import string
@@ -168,6 +168,7 @@ class StructureValidator(BaseValidator):
             return True
 
         logger.info(f"Validating scheme for {self.file_path}")
+        import logging  # noqa: TID251 # special case: controlling another logger
 
         try:
             # disabling massages of level ERROR and beneath of pykwalify such as: INFO:pykwalify.core:validation.valid
@@ -176,7 +177,11 @@ class StructureValidator(BaseValidator):
             if self.pykwalify_logs:
                 # reactivating pykwalify ERROR level logs
                 logging.disable(logging.ERROR)
-            scheme_file_name = "integration" if self.scheme_name.value == "betaintegration" else self.scheme_name.value  # type: ignore
+            scheme_file_name = (
+                "integration"
+                if self.scheme_name.value == "betaintegration"  # type: ignore[union-attr]
+                else self.scheme_name.value  # type: ignore[union-attr]
+            )
             path = os.path.normpath(
                 os.path.join(
                     __file__, "..", "..", self.SCHEMAS_PATH, f"{scheme_file_name}.yml"
@@ -344,7 +349,9 @@ class StructureValidator(BaseValidator):
         if "Cannot find required key" in error_line:
             return self.parse_missing_key_line(error_path, error_line)
 
-        elif "was not defined" in error_line:
+        elif (
+            "was not defined" in error_line or "does not match any regex" in error_line
+        ):
             return self.parse_undefined_key_line(error_path, error_line)
 
         elif "Enum" in error_line:

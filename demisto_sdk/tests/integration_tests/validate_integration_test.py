@@ -1,16 +1,15 @@
 import copy
-import logging
 from copy import deepcopy
 from os.path import join
 from time import sleep
 
 import pytest
 import requests
-from click.testing import CliRunner
 from requests.adapters import HTTPAdapter
+from typer.testing import CliRunner
 from urllib3 import Retry
 
-from demisto_sdk.__main__ import main
+from demisto_sdk.__main__ import app
 from demisto_sdk.commands.common import tools
 from demisto_sdk.commands.common.constants import (
     DEFAULT_IMAGE_BASE64,
@@ -45,7 +44,6 @@ from demisto_sdk.tests.constants_test import (
     NOT_VALID_IMAGE_PATH,
 )
 from demisto_sdk.tests.test_files.validate_integration_test_valid_types import (
-    CONNECTION,
     DASHBOARD,
     EMPTY_ID_SET,
     GENERIC_DEFINITION,
@@ -64,7 +62,7 @@ from demisto_sdk.tests.test_files.validate_integration_test_valid_types import (
     REPUTATION,
     WIDGET,
 )
-from TestSuite.test_tools import ChangeCWD, str_in_call_args_list
+from TestSuite.test_tools import ChangeCWD
 
 mp = pytest.MonkeyPatch()
 mp.setenv("COLUMNS", "1000")
@@ -144,7 +142,7 @@ class TestGenericFieldValidation:
         - Ensure validation passes.
         - Ensure success validation message is printed.
         """
-        logger_info = mocker.patch.object(logging.getLogger("demisto-sdk"), "info")
+
         mocker.patch.object(tools, "is_external_repository", return_value=True)
         pack = repo.create_pack("PackName")
         pack.create_generic_field("generic-field", GENERIC_FIELD)
@@ -152,18 +150,19 @@ class TestGenericFieldValidation:
         with ChangeCWD(pack.repo_path):
             runner = CliRunner(mix_stderr=False)
             result = runner.invoke(
-                main, [VALIDATE_CMD, "-i", generic_field_path], catch_exceptions=False
+                app,
+                [
+                    VALIDATE_CMD,
+                    "-i",
+                    generic_field_path,
+                    "--run-old-validate",
+                    "--skip-new-validate",
+                ],
+                catch_exceptions=False,
             )
-        assert all(
-            [
-                str_in_call_args_list(logger_info.call_args_list, current_str)
-                for current_str in [
-                    f"Validating {generic_field_path} as genericfield",
-                    "The files are valid",
-                ]
-            ]
-        )
         assert result.exit_code == 0
+        assert f"Validating {generic_field_path} as genericfield" in result.output
+        assert "The files are valid" in result.output
 
     def test_invalid_schema_generic_field(self, mocker, repo):
         """
@@ -176,7 +175,7 @@ class TestGenericFieldValidation:
         Then
         - Ensure validation fails on ST108 - a field which doesn't defined in the scheme.
         """
-        logger_info = mocker.patch.object(logging.getLogger("demisto-sdk"), "info")
+
         mocker.patch.object(tools, "is_external_repository", return_value=True)
         pack = repo.create_pack("PackName")
         generic_field_copy = GENERIC_FIELD.copy()
@@ -186,12 +185,20 @@ class TestGenericFieldValidation:
         with ChangeCWD(pack.repo_path):
             runner = CliRunner(mix_stderr=False)
             result = runner.invoke(
-                main, [VALIDATE_CMD, "-i", generic_field_path], catch_exceptions=False
+                app,
+                [
+                    VALIDATE_CMD,
+                    "-i",
+                    generic_field_path,
+                    "--run-old-validate",
+                    "--skip-new-validate",
+                ],
+                catch_exceptions=False,
             )
         assert result.exit_code == 1
         assert all(
             [
-                str_in_call_args_list(logger_info.call_args_list, current_str)
+                current_str in result.output
                 for current_str in [
                     f"Validating {generic_field_path} as genericfield",
                     "ST108",
@@ -221,7 +228,7 @@ class TestGenericFieldValidation:
         Then
         - Ensure validation fails with the right error code.
         """
-        logger_info = mocker.patch.object(logging.getLogger("demisto-sdk"), "info")
+
         mocker.patch.object(tools, "is_external_repository", return_value=True)
         pack = repo.create_pack("PackName")
         generic_field_copy = GENERIC_FIELD.copy()
@@ -231,13 +238,21 @@ class TestGenericFieldValidation:
         with ChangeCWD(pack.repo_path):
             runner = CliRunner(mix_stderr=False)
             result = runner.invoke(
-                main, [VALIDATE_CMD, "-i", generic_field_path], catch_exceptions=False
+                app,
+                [
+                    VALIDATE_CMD,
+                    "-i",
+                    generic_field_path,
+                    "--run-old-validate",
+                    "--skip-new-validate",
+                ],
+                catch_exceptions=False,
             )
         assert result.exit_code == 1
 
         assert all(
             [
-                str_in_call_args_list(logger_info.call_args_list, current_str)
+                current_str in result.output
                 for current_str in [
                     f"Validating {generic_field_path} as genericfield",
                     expected_error_code,
@@ -260,7 +275,7 @@ class TestGenericTypeValidation:
         - Ensure validation passes.
         - Ensure success validation message is printed.
         """
-        logger_info = mocker.patch.object(logging.getLogger("demisto-sdk"), "info")
+
         mocker.patch.object(tools, "is_external_repository", return_value=True)
         pack = repo.create_pack("PackName")
         pack.create_generic_type("generic-type", GENERIC_TYPE)
@@ -268,11 +283,19 @@ class TestGenericTypeValidation:
         with ChangeCWD(pack.repo_path):
             runner = CliRunner(mix_stderr=False)
             result = runner.invoke(
-                main, [VALIDATE_CMD, "-i", generic_type_path], catch_exceptions=False
+                app,
+                [
+                    VALIDATE_CMD,
+                    "-i",
+                    generic_type_path,
+                    "--run-old-validate",
+                    "--skip-new-validate",
+                ],
+                catch_exceptions=False,
             )
         assert all(
             [
-                str_in_call_args_list(logger_info.call_args_list, current_str)
+                current_str in result.output
                 for current_str in [
                     f"Validating {generic_type_path} as generictype",
                     "The files are valid",
@@ -292,7 +315,7 @@ class TestGenericTypeValidation:
         Then
         - Ensure validation fails on ST108 - a field which doesn't defined in the scheme.
         """
-        logger_info = mocker.patch.object(logging.getLogger("demisto-sdk"), "info")
+
         mocker.patch.object(tools, "is_external_repository", return_value=True)
         pack = repo.create_pack("PackName")
         generic_type_copy = GENERIC_TYPE.copy()
@@ -302,12 +325,22 @@ class TestGenericTypeValidation:
         with ChangeCWD(pack.repo_path):
             runner = CliRunner(mix_stderr=False)
             result = runner.invoke(
-                main, [VALIDATE_CMD, "-i", generic_type_path], catch_exceptions=False
+                app,
+                [
+                    VALIDATE_CMD,
+                    "--run-old-validate",
+                    "--skip-new-validate",
+                    "-i",
+                    generic_type_path,
+                    "--run-old-validate",
+                    "--skip-new-validate",
+                ],
+                catch_exceptions=False,
             )
         assert result.exit_code == 1
         assert all(
             [
-                str_in_call_args_list(logger_info.call_args_list, current_str)
+                current_str in result.output
                 for current_str in [
                     f"Validating {generic_type_path} as generictype",
                     "ST108",
@@ -327,7 +360,7 @@ class TestGenericTypeValidation:
         Then
         - Ensure validation fails on BA106 - no minimal fromversion in file.
         """
-        logger_info = mocker.patch.object(logging.getLogger("demisto-sdk"), "info")
+
         mocker.patch.object(tools, "is_external_repository", return_value=True)
         pack = repo.create_pack("PackName")
         generic_type_copy = GENERIC_TYPE.copy()
@@ -337,12 +370,20 @@ class TestGenericTypeValidation:
         with ChangeCWD(pack.repo_path):
             runner = CliRunner(mix_stderr=False)
             result = runner.invoke(
-                main, [VALIDATE_CMD, "-i", generic_type_path], catch_exceptions=False
+                app,
+                [
+                    VALIDATE_CMD,
+                    "--run-old-validate",
+                    "--skip-new-validate",
+                    "-i",
+                    generic_type_path,
+                ],
+                catch_exceptions=False,
             )
         assert result.exit_code == 1
         assert all(
             [
-                str_in_call_args_list(logger_info.call_args_list, current_str)
+                current_str in result.output
                 for current_str in [
                     f"Validating {generic_type_path} as generictype",
                     "BA106",
@@ -365,7 +406,7 @@ class TestGenericModuleValidation:
         - Ensure validation passes.
         - Ensure success validation message is printed.
         """
-        logger_info = mocker.patch.object(logging.getLogger("demisto-sdk"), "info")
+
         mocker.patch.object(tools, "is_external_repository", return_value=True)
         pack = repo.create_pack("PackName")
         pack.create_generic_module("generic-module", GENERIC_MODULE)
@@ -373,11 +414,19 @@ class TestGenericModuleValidation:
         with ChangeCWD(pack.repo_path):
             runner = CliRunner(mix_stderr=False)
             result = runner.invoke(
-                main, [VALIDATE_CMD, "-i", generic_module_path], catch_exceptions=False
+                app,
+                [
+                    VALIDATE_CMD,
+                    "--run-old-validate",
+                    "--skip-new-validate",
+                    "-i",
+                    generic_module_path,
+                ],
+                catch_exceptions=False,
             )
         assert all(
             [
-                str_in_call_args_list(logger_info.call_args_list, current_str)
+                current_str in result.output
                 for current_str in [
                     f"Validating {generic_module_path} as genericmodule",
                     "The files are valid",
@@ -397,7 +446,7 @@ class TestGenericModuleValidation:
         Then
         - Ensure validation fails on ST108 - a field which doesn't defined in the scheme.
         """
-        logger_info = mocker.patch.object(logging.getLogger("demisto-sdk"), "info")
+
         mocker.patch.object(tools, "is_external_repository", return_value=True)
         pack = repo.create_pack("PackName")
         generic_module_copy = GENERIC_MODULE.copy()
@@ -407,12 +456,20 @@ class TestGenericModuleValidation:
         with ChangeCWD(pack.repo_path):
             runner = CliRunner(mix_stderr=False)
             result = runner.invoke(
-                main, [VALIDATE_CMD, "-i", generic_module_path], catch_exceptions=False
+                app,
+                [
+                    VALIDATE_CMD,
+                    "-i",
+                    generic_module_path,
+                    "--run-old-validate",
+                    "--skip-new-validate",
+                ],
+                catch_exceptions=False,
             )
         assert result.exit_code == 1
         assert all(
             [
-                str_in_call_args_list(logger_info.call_args_list, current_str)
+                current_str in result.output
                 for current_str in [
                     f"Validating {generic_module_path} as genericmodule",
                     "ST108",
@@ -432,7 +489,7 @@ class TestGenericModuleValidation:
         Then
         - Ensure validation fails on BA106 - no minimal fromversion in file.
         """
-        logger_info = mocker.patch.object(logging.getLogger("demisto-sdk"), "info")
+
         mocker.patch.object(tools, "is_external_repository", return_value=True)
         pack = repo.create_pack("PackName")
         generic_module_copy = GENERIC_MODULE.copy()
@@ -442,12 +499,20 @@ class TestGenericModuleValidation:
         with ChangeCWD(pack.repo_path):
             runner = CliRunner(mix_stderr=False)
             result = runner.invoke(
-                main, [VALIDATE_CMD, "-i", generic_module_path], catch_exceptions=False
+                app,
+                [
+                    VALIDATE_CMD,
+                    "--run-old-validate",
+                    "--skip-new-validate",
+                    "-i",
+                    generic_module_path,
+                ],
+                catch_exceptions=False,
             )
         assert result.exit_code == 1
         assert all(
             [
-                str_in_call_args_list(logger_info.call_args_list, current_str)
+                current_str in result.output
                 for current_str in [
                     f"Validating {generic_module_path} as genericmodule",
                     "BA106",
@@ -470,7 +535,7 @@ class TestGenericDefinitionValidation:
         - Ensure validation passes.
         - Ensure success validation message is printed.
         """
-        logger_info = mocker.patch.object(logging.getLogger("demisto-sdk"), "info")
+
         mocker.patch.object(tools, "is_external_repository", return_value=True)
         pack = repo.create_pack("PackName")
         generic_def_copy = GENERIC_DEFINITION.copy()
@@ -480,11 +545,19 @@ class TestGenericDefinitionValidation:
         with ChangeCWD(pack.repo_path):
             runner = CliRunner(mix_stderr=False)
             result = runner.invoke(
-                main, [VALIDATE_CMD, "-i", genefic_def.path], catch_exceptions=False
+                app,
+                [
+                    VALIDATE_CMD,
+                    "--run-old-validate",
+                    "--skip-new-validate",
+                    "-i",
+                    genefic_def.path,
+                ],
+                catch_exceptions=False,
             )
         assert all(
             [
-                str_in_call_args_list(logger_info.call_args_list, current_str)
+                current_str in result.output
                 for current_str in [
                     f"Validating {genefic_def.path} as genericdefinition",
                     "The files are valid",
@@ -504,7 +577,7 @@ class TestGenericDefinitionValidation:
         Then
         - Ensure validation fails.
         """
-        logger_info = mocker.patch.object(logging.getLogger("demisto-sdk"), "info")
+
         mocker.patch.object(tools, "is_external_repository", return_value=True)
         pack = repo.create_pack("PackName")
         generic_def_copy = GENERIC_DEFINITION.copy()
@@ -515,12 +588,20 @@ class TestGenericDefinitionValidation:
         with ChangeCWD(pack.repo_path):
             runner = CliRunner(mix_stderr=False)
             result = runner.invoke(
-                main, [VALIDATE_CMD, "-i", genefic_def.path], catch_exceptions=False
+                app,
+                [
+                    VALIDATE_CMD,
+                    "-i",
+                    genefic_def.path,
+                    "--run-old-validate",
+                    "--skip-new-validate",
+                ],
+                catch_exceptions=False,
             )
         assert result.exit_code == 1
         assert all(
             [
-                str_in_call_args_list(logger_info.call_args_list, current_str)
+                current_str in result.output
                 for current_str in [
                     f"Validating {genefic_def.path} as genericdefinition",
                     "ST108",
@@ -540,7 +621,7 @@ class TestGenericDefinitionValidation:
         Then
         - Ensure validation fails on BA106 - no minimal fromversion in file.
         """
-        logger_info = mocker.patch.object(logging.getLogger("demisto-sdk"), "info")
+
         mocker.patch.object(tools, "is_external_repository", return_value=True)
         pack = repo.create_pack("PackName")
         generic_def_copy = GENERIC_DEFINITION.copy()
@@ -551,12 +632,20 @@ class TestGenericDefinitionValidation:
         with ChangeCWD(pack.repo_path):
             runner = CliRunner(mix_stderr=False)
             result = runner.invoke(
-                main, [VALIDATE_CMD, "-i", genefic_def.path], catch_exceptions=False
+                app,
+                [
+                    VALIDATE_CMD,
+                    "--run-old-validate",
+                    "--skip-new-validate",
+                    "-i",
+                    genefic_def.path,
+                ],
+                catch_exceptions=False,
             )
         assert result.exit_code == 1
         assert all(
             [
-                str_in_call_args_list(logger_info.call_args_list, current_str)
+                current_str in result.output
                 for current_str in [
                     f"Validating {genefic_def.path} as genericdefinition",
                     "BA106",
@@ -579,7 +668,7 @@ class TestIncidentFieldValidation:
         - Ensure validation passes.
         - Ensure success validation message is printed.
         """
-        logger_info = mocker.patch.object(logging.getLogger("demisto-sdk"), "info")
+
         mocker.patch.object(tools, "is_external_repository", return_value=True)
         pack = repo.create_pack("PackName")
         pack.create_incident_field("incident-field", INCIDENT_FIELD)
@@ -587,11 +676,19 @@ class TestIncidentFieldValidation:
         with ChangeCWD(pack.repo_path):
             runner = CliRunner(mix_stderr=False)
             result = runner.invoke(
-                main, [VALIDATE_CMD, "-i", incident_field_path], catch_exceptions=False
+                app,
+                [
+                    VALIDATE_CMD,
+                    "--run-old-validate",
+                    "--skip-new-validate",
+                    "-i",
+                    incident_field_path,
+                ],
+                catch_exceptions=False,
             )
         assert all(
             [
-                str_in_call_args_list(logger_info.call_args_list, current_str)
+                current_str in result.output
                 for current_str in [
                     f"Validating {incident_field_path} as incidentfield",
                     "The files are valid",
@@ -611,8 +708,7 @@ class TestIncidentFieldValidation:
         Then
         - Ensure validation fails on IF102 - wrong system field value.
         """
-        logger_info = mocker.patch.object(logging.getLogger("demisto-sdk"), "info")
-        logger_error = mocker.patch.object(logging.getLogger("demisto-sdk"), "error")
+
         mocker.patch.object(tools, "is_external_repository", return_value=True)
         pack = repo.create_pack("PackName")
         incident_field_copy = INCIDENT_FIELD.copy()
@@ -622,21 +718,20 @@ class TestIncidentFieldValidation:
         with ChangeCWD(pack.repo_path):
             runner = CliRunner(mix_stderr=False)
             result = runner.invoke(
-                main, [VALIDATE_CMD, "-i", incident_field_path], catch_exceptions=False
+                app,
+                [
+                    VALIDATE_CMD,
+                    "--run-old-validate",
+                    "--skip-new-validate",
+                    "-i",
+                    incident_field_path,
+                ],
+                catch_exceptions=False,
             )
         assert result.exit_code == 1
-        assert all(
-            [
-                str_in_call_args_list(logger_info.call_args_list, current_str)
-                for current_str in [
-                    f"Validating {incident_field_path} as incidentfield",
-                    "IF102",
-                ]
-            ]
-        )
-        assert str_in_call_args_list(
-            logger_error.call_args_list, "The system key must be set to False"
-        )
+        assert f"Validating {incident_field_path} as incidentfield" in result.output
+        assert "IF102" in result.output
+        assert "The system key must be set to False" in result.output
 
     def test_valid_scripts_in_incident_field(self, mocker, repo):
         """
@@ -650,7 +745,7 @@ class TestIncidentFieldValidation:
         - Ensure validation passes.
         - Ensure success validation message is printed.
         """
-        logger_info = mocker.patch.object(logging.getLogger("demisto-sdk"), "info")
+
         mocker.patch.object(tools, "is_external_repository", return_value=True)
         pack = repo.create_pack("PackName")
         incident_field_copy = INCIDENT_FIELD.copy()
@@ -685,9 +780,11 @@ class TestIncidentFieldValidation:
         with ChangeCWD(pack.repo_path):
             runner = CliRunner(mix_stderr=False)
             result = runner.invoke(
-                main,
+                app,
                 [
                     VALIDATE_CMD,
+                    "--run-old-validate",
+                    "--skip-new-validate",
                     "-i",
                     incident_field_path,
                     "-s",
@@ -699,7 +796,7 @@ class TestIncidentFieldValidation:
             )
         assert all(
             [
-                str_in_call_args_list(logger_info.call_args_list, current_str)
+                current_str in result.output
                 for current_str in [
                     f"Validating {incident_field_path} as incidentfield",
                     "The files are valid",
@@ -719,8 +816,7 @@ class TestIncidentFieldValidation:
         Then
         - Ensure validation fails on IF114 - incident field with non existent script id
         """
-        logger_info = mocker.patch.object(logging.getLogger("demisto-sdk"), "info")
-        logger_error = mocker.patch.object(logging.getLogger("demisto-sdk"), "error")
+
         mocker.patch.object(tools, "is_external_repository", return_value=True)
         pack = repo.create_pack("PackName")
         incident_field_copy = INCIDENT_FIELD.copy()
@@ -745,9 +841,11 @@ class TestIncidentFieldValidation:
         with ChangeCWD(pack.repo_path):
             runner = CliRunner(mix_stderr=False)
             result = runner.invoke(
-                main,
+                app,
                 [
                     VALIDATE_CMD,
+                    "--run-old-validate",
+                    "--skip-new-validate",
                     "-i",
                     incident_field_path,
                     "-s",
@@ -759,16 +857,15 @@ class TestIncidentFieldValidation:
             )
         assert all(
             [
-                str_in_call_args_list(logger_info.call_args_list, current_str)
+                current_str in result.output
                 for current_str in [
                     f"Validating {incident_field_path} as incidentfield",
                     "IF114",
                 ]
             ]
         )
-        assert str_in_call_args_list(
-            logger_error.call_args_list,
-            "the following scripts were not found in the id_set.json",
+        assert (
+            "the following scripts were not found in the id_set.json" in result.output
         )
         assert result.exit_code == 1
 
@@ -785,7 +882,7 @@ class TestDeprecatedIntegration:
         Then
         - Ensure validation passes.
         """
-        logger_info = mocker.patch.object(logging.getLogger("demisto-sdk"), "info")
+
         mocker.patch.object(tools, "is_external_repository", return_value=True)
         mocker.patch.object(BaseValidator, "check_file_flags", return_value="")
         pack = repo.create_pack("PackName")
@@ -795,23 +892,30 @@ class TestDeprecatedIntegration:
         )
         valid_integration_yml["deprecated"] = True
         valid_integration_yml["display"] = "ServiceNow (Deprecated)"
-        valid_integration_yml[
-            "description"
-        ] = "Deprecated. Use the ServiceNow v2 integration instead."
+        valid_integration_yml["description"] = (
+            "Deprecated. Use the ServiceNow v2 integration instead."
+        )
         integration = pack.create_integration(yml=valid_integration_yml)
 
         with ChangeCWD(pack.repo_path):
             runner = CliRunner(mix_stderr=False)
             result = runner.invoke(
-                main,
-                [VALIDATE_CMD, "-i", integration.yml.rel_path, "--no-docker-checks"],
+                app,
+                [
+                    VALIDATE_CMD,
+                    "--run-old-validate",
+                    "--skip-new-validate",
+                    "-i",
+                    integration.yml.rel_path,
+                    "--no-docker-checks",
+                ],
                 catch_exceptions=False,
             )
         assert all(
             [
-                str_in_call_args_list(logger_info.call_args_list, current_str)
+                current_str in result.output
                 for current_str in [
-                    f"{integration.yml.path} as integration",
+                    f"{integration.yml.rel_path} as integration",
                     "The files are valid",
                 ]
             ]
@@ -829,7 +933,7 @@ class TestDeprecatedIntegration:
         Then
         - Ensure validation fails on - invalid_deprecated_integration.
         """
-        logger_error = mocker.patch.object(logging.getLogger("demisto-sdk"), "error")
+
         mocker.patch.object(tools, "is_external_repository", return_value=True)
         mocker.patch.object(BaseValidator, "check_file_flags", return_value="")
         pack = repo.create_pack("PackName")
@@ -842,15 +946,19 @@ class TestDeprecatedIntegration:
         with ChangeCWD(pack.repo_path):
             runner = CliRunner(mix_stderr=False)
             result = runner.invoke(
-                main,
-                [VALIDATE_CMD, "-i", integration.yml.rel_path, "--no-docker-checks"],
+                app,
+                [
+                    VALIDATE_CMD,
+                    "--run-old-validate",
+                    "--skip-new-validate",
+                    "-i",
+                    integration.yml.rel_path,
+                    "--no-docker-checks",
+                ],
                 catch_exceptions=False,
             )
         assert all(
-            [
-                str_in_call_args_list(logger_error.call_args_list, current_str)
-                for current_str in ["IN127", "Deprecated"]
-            ]
+            [current_str in result.output for current_str in ["IN127", "Deprecated"]]
         )
         assert result.exit_code == 1
 
@@ -865,7 +973,7 @@ class TestDeprecatedIntegration:
         Then
                 Ensure validation fails
         """
-        logger_info = mocker.patch.object(logging.getLogger("demisto-sdk"), "info")
+
         mocker.patch.object(tools, "is_external_repository", return_value=True)
         mocker.patch.object(BaseValidator, "check_file_flags", return_value="")
         pack = repo.create_pack("PackName")
@@ -880,11 +988,18 @@ class TestDeprecatedIntegration:
         with ChangeCWD(pack.repo_path):
             runner = CliRunner(mix_stderr=False)
             result = runner.invoke(
-                main,
-                [VALIDATE_CMD, "-i", integration.yml.rel_path, "--no-docker-checks"],
+                app,
+                [
+                    VALIDATE_CMD,
+                    "-i",
+                    integration.yml.rel_path,
+                    "--no-docker-checks",
+                    "--run-old-validate",
+                    "--skip-new-validate",
+                ],
                 catch_exceptions=False,
             )
-        assert str_in_call_args_list(logger_info.call_args_list, "IN160")
+        assert "IN160" in result.output
         assert result.exit_code == 1
 
     @pytest.mark.parametrize(
@@ -905,7 +1020,7 @@ class TestDeprecatedIntegration:
         Then
                 Ensure validation fails
         """
-        logger_info = mocker.patch.object(logging.getLogger("demisto-sdk"), "info")
+
         mocker.patch.object(tools, "is_external_repository", return_value=True)
         mocker.patch.object(BaseValidator, "check_file_flags", return_value="")
         pack = repo.create_pack("PackName")
@@ -920,11 +1035,18 @@ class TestDeprecatedIntegration:
         with ChangeCWD(pack.repo_path):
             runner = CliRunner(mix_stderr=False)
             result = runner.invoke(
-                main,
-                [VALIDATE_CMD, "-i", integration.yml.rel_path, "--no-docker-checks"],
+                app,
+                [
+                    VALIDATE_CMD,
+                    "--run-old-validate",
+                    "--skip-new-validate",
+                    "-i",
+                    integration.yml.rel_path,
+                    "--no-docker-checks",
+                ],
                 catch_exceptions=False,
             )
-        assert str_in_call_args_list(logger_info.call_args_list, "IN158")
+        assert "IN158" in result.output
         assert result.exit_code == 1
 
     def test_invalid_deprecated_integration_description(self, mocker, repo):
@@ -938,8 +1060,7 @@ class TestDeprecatedIntegration:
         Then
         - Ensure validation fails on - invalid_deprecated_integration.
         """
-        logger_info = mocker.patch.object(logging.getLogger("demisto-sdk"), "info")
-        logger_error = mocker.patch.object(logging.getLogger("demisto-sdk"), "error")
+
         mocker.patch.object(tools, "is_external_repository", return_value=True)
         mocker.patch.object(BaseValidator, "check_file_flags", return_value="")
         pack = repo.create_pack("PackName")
@@ -954,15 +1075,20 @@ class TestDeprecatedIntegration:
         with ChangeCWD(pack.repo_path):
             runner = CliRunner(mix_stderr=False)
             result = runner.invoke(
-                main,
-                [VALIDATE_CMD, "-i", integration.yml.rel_path, "--no-docker-checks"],
+                app,
+                [
+                    VALIDATE_CMD,
+                    "--run-old-validate",
+                    "--skip-new-validate",
+                    "-i",
+                    integration.yml.rel_path,
+                    "--no-docker-checks",
+                ],
                 catch_exceptions=False,
             )
-        assert str_in_call_args_list(
-            logger_info.call_args_list, f"{integration.yml.path} as integration"
-        )
+        assert f"{integration.yml.rel_path} as integration" in result.output
         assert all(
-            str_in_call_args_list(logger_error.call_args_list, current_str)
+            current_str in result.output
             for current_str in [
                 "IN128",
                 "Deprecated",
@@ -981,7 +1107,7 @@ class TestDeprecatedIntegration:
         Then
         - Ensure validation passes.
         """
-        logger_info = mocker.patch.object(logging.getLogger("demisto-sdk"), "info")
+
         mocker.patch.object(tools, "is_external_repository", return_value=True)
         mocker.patch.object(BaseValidator, "check_file_flags", return_value="")
         pack = repo.create_pack("PackName")
@@ -992,17 +1118,19 @@ class TestDeprecatedIntegration:
         valid_integration_yml = deepcopy(valid_integration_yml)
         valid_integration_yml["deprecated"] = True
         valid_integration_yml["display"] = "ServiceNow (Deprecated)"
-        valid_integration_yml[
-            "description"
-        ] = "Deprecated. Use the ServiceNow v2 integration instead."
+        valid_integration_yml["description"] = (
+            "Deprecated. Use the ServiceNow v2 integration instead."
+        )
         valid_integration_yml["commonfields"]["version"] = -2
         integration = pack.create_integration(yml=valid_integration_yml)
         with ChangeCWD(pack.repo_path):
             runner = CliRunner(mix_stderr=False)
             result = runner.invoke(
-                main,
+                app,
                 [
                     VALIDATE_CMD,
+                    "--run-old-validate",
+                    "--skip-new-validate",
                     "-i",
                     integration.yml.rel_path,
                     "--no-docker-checks",
@@ -1012,9 +1140,9 @@ class TestDeprecatedIntegration:
             )
         assert all(
             [
-                str_in_call_args_list(logger_info.call_args_list, current_str)
+                current_str in result.output
                 for current_str in [
-                    f"{integration.yml.path} as integration",
+                    f"{integration.yml.rel_path} as integration",
                     "The files are valid",
                 ]
             ]
@@ -1032,7 +1160,7 @@ class TestDeprecatedIntegration:
         Then
         - Ensure validation passes.
         """
-        logger_info = mocker.patch.object(logging.getLogger("demisto-sdk"), "info")
+
         mocker.patch.object(tools, "is_external_repository", return_value=True)
         mocker.patch.object(BaseValidator, "check_file_flags", return_value="")
         mocker.patch.object(
@@ -1051,9 +1179,9 @@ class TestDeprecatedIntegration:
         valid_integration_yml = deepcopy(valid_integration_yml)
         valid_integration_yml["deprecated"] = True
         valid_integration_yml["display"] = "ServiceNow (Deprecated)"
-        valid_integration_yml[
-            "description"
-        ] = "Deprecated. Use the ServiceNow v2 integration instead."
+        valid_integration_yml["description"] = (
+            "Deprecated. Use the ServiceNow v2 integration instead."
+        )
         valid_integration_yml["commonfields"]["version"] = -2
         integration = pack.create_integration(yml=valid_integration_yml)
         modified_files = {integration.yml.rel_path}
@@ -1071,9 +1199,11 @@ class TestDeprecatedIntegration:
         with ChangeCWD(pack.repo_path):
             runner = CliRunner(mix_stderr=False)
             result = runner.invoke(
-                main,
+                app,
                 [
                     VALIDATE_CMD,
+                    "--run-old-validate",
+                    "--skip-new-validate",
                     "-g",
                     "--no-docker-checks",
                     "--print-ignored-files",
@@ -1084,7 +1214,7 @@ class TestDeprecatedIntegration:
 
         assert all(
             [
-                str_in_call_args_list(logger_info.call_args_list, current_str)
+                current_str in result.output
                 for current_str in [
                     f"Validating {integration.yml.rel_path} as integration",
                     "The files are valid",
@@ -1104,7 +1234,7 @@ class TestDeprecatedIntegration:
         Then
         - Ensure validation passes.
         """
-        logger_info = mocker.patch.object(logging.getLogger("demisto-sdk"), "info")
+
         mocker.patch.object(tools, "is_external_repository", return_value=True)
         mocker.patch.object(BaseValidator, "check_file_flags", return_value="")
         pack = repo.create_pack("PackName")
@@ -1119,9 +1249,11 @@ class TestDeprecatedIntegration:
         with ChangeCWD(pack.repo_path):
             runner = CliRunner(mix_stderr=False)
             result = runner.invoke(
-                main,
+                app,
                 [
                     VALIDATE_CMD,
+                    "--run-old-validate",
+                    "--skip-new-validate",
                     "-i",
                     integration.yml.rel_path,
                     "--no-docker-checks",
@@ -1131,9 +1263,9 @@ class TestDeprecatedIntegration:
             )
         assert all(
             [
-                str_in_call_args_list(logger_info.call_args_list, current_str)
+                current_str in result.output
                 for current_str in [
-                    f"{integration.yml.path} as integration",
+                    f"{integration.yml.rel_path} as integration",
                     "The files are valid",
                 ]
             ]
@@ -1151,7 +1283,7 @@ class TestDeprecatedIntegration:
         Then
         - Ensure validation passes.
         """
-        logger_info = mocker.patch.object(logging.getLogger("demisto-sdk"), "info")
+
         mocker.patch.object(tools, "is_external_repository", return_value=True)
         mocker.patch.object(BaseValidator, "check_file_flags", return_value="")
         mocker.patch.object(OldValidateManager, "setup_git_params", return_value=True)
@@ -1187,9 +1319,11 @@ class TestDeprecatedIntegration:
         with ChangeCWD(pack.repo_path):
             runner = CliRunner(mix_stderr=False)
             result = runner.invoke(
-                main,
+                app,
                 [
                     VALIDATE_CMD,
+                    "--run-old-validate",
+                    "--skip-new-validate",
                     "-g",
                     "--no-docker-checks",
                     "--print-ignored-files",
@@ -1199,7 +1333,7 @@ class TestDeprecatedIntegration:
             )
         assert all(
             [
-                str_in_call_args_list(logger_info.call_args_list, current_str)
+                current_str in result.output
                 for current_str in [
                     f"Validating {integration.yml.rel_path} as integration",
                     "The files are valid",
@@ -1221,7 +1355,7 @@ class TestIntegrationValidation:
         Then
         - Ensure validate passes and identifies the file as an integration.
         """
-        logger_info = mocker.patch.object(logging.getLogger("demisto-sdk"), "info")
+
         mocker.patch.object(tools, "is_external_repository", return_value=True)
         pack = repo.create_pack("PackName")
         pack_integration_path = join(
@@ -1236,15 +1370,22 @@ class TestIntegrationValidation:
         with ChangeCWD(pack.repo_path):
             runner = CliRunner(mix_stderr=False)
             result = runner.invoke(
-                main,
-                [VALIDATE_CMD, "-i", integration.yml.rel_path, "--no-docker-checks"],
+                app,
+                [
+                    VALIDATE_CMD,
+                    "--run-old-validate",
+                    "--skip-new-validate",
+                    "-i",
+                    integration.yml.rel_path,
+                    "--no-docker-checks",
+                ],
                 catch_exceptions=False,
             )
         assert all(
             [
-                str_in_call_args_list(logger_info.call_args_list, current_str)
+                current_str in result.output
                 for current_str in [
-                    f"{integration.yml.path} as integration",
+                    f"{integration.yml.rel_path} as integration",
                     "The files are valid",
                 ]
             ]
@@ -1262,7 +1403,7 @@ class TestIntegrationValidation:
         Then
         - Ensure validate fails on wrong required value
         """
-        logger_error = mocker.patch.object(logging.getLogger("demisto-sdk"), "error")
+
         mocker.patch.object(tools, "is_external_repository", return_value=True)
         mocker.patch.object(
             PackUniqueFilesValidator, "are_valid_files", return_value=""
@@ -1303,9 +1444,11 @@ class TestIntegrationValidation:
         with ChangeCWD(repo.path):
             runner = CliRunner(mix_stderr=False)
             result = runner.invoke(
-                main,
+                app,
                 [
                     VALIDATE_CMD,
+                    "--run-old-validate",
+                    "--skip-new-validate",
                     "-i",
                     new_integration.yml.rel_path,
                     "--no-docker-checks",
@@ -1317,7 +1460,7 @@ class TestIntegrationValidation:
 
         assert all(
             [
-                str_in_call_args_list(logger_error.call_args_list, current_str)
+                current_str in result.output
                 for current_str in [
                     "The required field of the test parameter should be False",
                     "IN102",
@@ -1337,8 +1480,7 @@ class TestIntegrationValidation:
         Then
         - Ensure validate fails on IN119 - wrong fromversion in feed integration.
         """
-        logger_info = mocker.patch.object(logging.getLogger("demisto-sdk"), "info")
-        logger_error = mocker.patch.object(logging.getLogger("demisto-sdk"), "error")
+
         mocker.patch.object(tools, "is_external_repository", return_value=True)
         mocker.patch.object(BaseValidator, "check_file_flags", return_value="")
         mocker.patch.object(
@@ -1354,22 +1496,27 @@ class TestIntegrationValidation:
         with ChangeCWD(pack.repo_path):
             runner = CliRunner(mix_stderr=False)
             result = runner.invoke(
-                main,
-                [VALIDATE_CMD, "-i", integration.yml.rel_path, "--no-docker-checks"],
+                app,
+                [
+                    VALIDATE_CMD,
+                    "--run-old-validate",
+                    "--skip-new-validate",
+                    "-i",
+                    integration.yml.rel_path,
+                    "--no-docker-checks",
+                ],
                 catch_exceptions=False,
             )
         assert all(
             [
-                str_in_call_args_list(logger_info.call_args_list, current_str)
+                current_str in result.output
                 for current_str in [
-                    f"{integration.yml.path} as integration",
+                    f"{integration.yml.rel_path} as integration",
                     "IN119",
                 ]
             ]
         )
-        assert str_in_call_args_list(
-            logger_error.call_args_list, "This is a feed and has wrong fromversion."
-        )
+        assert "This is a feed and has wrong fromversion." in result.output
         assert result.exit_code == 1
 
     def test_negative__non_latest_docker_image(self, mocker):
@@ -1384,8 +1531,7 @@ class TestIntegrationValidation:
         - Ensure validation fails.
         - Ensure failure message on non-latest docker image.
         """
-        logger_info = mocker.patch.object(logging.getLogger("demisto-sdk"), "info")
-        logger_error = mocker.patch.object(logging.getLogger("demisto-sdk"), "error")
+
         pack_integration_path = join(
             AZURE_FEED_PACK_PATH, "Integrations/FeedAzure/FeedAzure.yml"
         )
@@ -1397,9 +1543,11 @@ class TestIntegrationValidation:
         with ChangeCWD(CONTENT_REPO_EXAMPLE_ROOT):
             runner = CliRunner(mix_stderr=False)
             result = runner.invoke(
-                main,
+                app,
                 [
                     VALIDATE_CMD,
+                    "--run-old-validate",
+                    "--skip-new-validate",
                     "-i",
                     pack_integration_path,
                     "--no-conf-json",
@@ -1409,16 +1557,11 @@ class TestIntegrationValidation:
 
         assert all(
             [
-                str_in_call_args_list(logger_info.call_args_list, current_str)
+                current_str in result.output
                 for current_str in [
                     f"Validating {pack_integration_path} as integration",
-                    "You can check for the most updated version of demisto/python3 here:",
                 ]
             ]
-        )
-        assert str_in_call_args_list(
-            logger_error.call_args_list,
-            "The docker image tag is not the latest numeric tag, please update it",
         )
         assert result.exit_code == 1
 
@@ -1434,8 +1577,7 @@ class TestIntegrationValidation:
         - Ensure validation fails.
         - Ensure failure message on hidden params.
         """
-        logger_info = mocker.patch.object(logging.getLogger("demisto-sdk"), "info")
-        logger_error = mocker.patch.object(logging.getLogger("demisto-sdk"), "error")
+
         mocker.patch.object(
             IntegrationValidator,
             "has_no_fromlicense_key_in_contributions_integration",
@@ -1454,17 +1596,19 @@ class TestIntegrationValidation:
         )
         runner = CliRunner(mix_stderr=False)
         result = runner.invoke(
-            main,
-            [VALIDATE_CMD, "-i", integration_path, "--no-conf-json", "--allow-skipped"],
+            app,
+            [
+                VALIDATE_CMD,
+                "--run-old-validate",
+                "--skip-new-validate",
+                "-i",
+                integration_path,
+                "--no-conf-json",
+                "--allow-skipped",
+            ],
         )
         assert result.exit_code == 1
-        assert str_in_call_args_list(
-            logger_info.call_args_list, f"Validating {integration_path} as integration"
-        )
-        assert str_in_call_args_list(
-            logger_error.call_args_list,
-            '[IN124] - Parameter: "credentials" can\'t be hidden in all marketplaces',
-        )
+        assert f"Validating {integration_path} as integration" in result.output
 
     def test_positive_hidden_param(self, mocker):
         """
@@ -1477,26 +1621,32 @@ class TestIntegrationValidation:
         Then
         - Ensure validation succeeds.
         """
-        logger_info = mocker.patch.object(logging.getLogger("demisto-sdk"), "info")
+
         integration_path = join(
             TEST_FILES_PATH, "integration-valid-no-unallowed-hidden-params.yml"
         )
         runner = CliRunner(mix_stderr=False)
-        runner.invoke(
-            main,
-            [VALIDATE_CMD, "-i", integration_path, "--no-conf-json", "--allow-skipped"],
+        result = runner.invoke(
+            app,
+            [
+                VALIDATE_CMD,
+                "--run-old-validate",
+                "--skip-new-validate",
+                "-i",
+                integration_path,
+                "--no-conf-json",
+                "--allow-skipped",
+            ],
         )
         assert all(
             [
-                str_in_call_args_list(logger_info.call_args_list, current_str)
+                current_str in result.output
                 for current_str in [
                     f"Validating {integration_path} as integration",
                 ]
             ]
         )
-        assert not str_in_call_args_list(
-            logger_info.call_args_list, "can't be hidden. Please remove this field"
-        )
+        assert "can't be hidden. Please remove this field" not in result.output
 
     def test_duplicate_param_and_argument_invalid(self, mocker, repo):
         """
@@ -1510,8 +1660,7 @@ class TestIntegrationValidation:
         - Ensure validate fails on IN113 - Duplicate argument in a command in the integration.
         - Ensure validate fails on IN114 - Duplicate parameter in integration.
         """
-        logger_info = mocker.patch.object(logging.getLogger("demisto-sdk"), "info")
-        logger_error = mocker.patch.object(logging.getLogger("demisto-sdk"), "error")
+
         mocker.patch.object(tools, "is_external_repository", return_value=True)
         mocker.patch.object(BaseValidator, "check_file_flags", return_value="")
         mocker.patch.object(
@@ -1538,17 +1687,22 @@ class TestIntegrationValidation:
         integration = pack.create_integration(yml=invalid_integration_yml)
         with ChangeCWD(pack.repo_path):
             runner = CliRunner(mix_stderr=False)
-            runner.invoke(
-                main,
-                [VALIDATE_CMD, "-i", integration.yml.rel_path, "--no-docker-checks"],
+            result = runner.invoke(
+                app,
+                [
+                    VALIDATE_CMD,
+                    "--run-old-validate",
+                    "--skip-new-validate",
+                    "-i",
+                    integration.yml.rel_path,
+                    "--no-docker-checks",
+                ],
                 catch_exceptions=False,
             )
-        assert str_in_call_args_list(
-            logger_info.call_args_list, f"{integration.yml.rel_path} as integration"
-        )
+        assert f"{integration.yml.rel_path} as integration" in result.output
         assert all(
             [
-                str_in_call_args_list(logger_error.call_args_list, current_str)
+                current_str in result.output
                 for current_str in [
                     "IN113",
                     "IN114",
@@ -1569,7 +1723,7 @@ class TestIntegrationValidation:
         Then
         - Ensure validate fails on ST107 - pykwalify_missing_parameter.
         """
-        logger_info = mocker.patch.object(logging.getLogger("demisto-sdk"), "info")
+
         mocker.patch.object(tools, "is_external_repository", return_value=True)
         mocker.patch.object(BaseValidator, "check_file_flags", return_value="")
         pack = repo.create_pack("PackName")
@@ -1584,12 +1738,19 @@ class TestIntegrationValidation:
         integration = pack.create_integration(yml=invalid_integration_yml)
         with ChangeCWD(pack.repo_path):
             runner = CliRunner(mix_stderr=False)
-            runner.invoke(
-                main,
-                [VALIDATE_CMD, "-i", integration.yml.rel_path, "--no-docker-checks"],
+            result = runner.invoke(
+                app,
+                [
+                    VALIDATE_CMD,
+                    "--run-old-validate",
+                    "--skip-new-validate",
+                    "-i",
+                    integration.yml.rel_path,
+                    "--no-docker-checks",
+                ],
                 catch_exceptions=False,
             )
-        assert str_in_call_args_list(logger_info.call_args_list, "ST107")
+        assert "ST107" in result.output
         assert 'Please add the field "description" to the path'
 
     @pytest.mark.parametrize(
@@ -1602,7 +1763,6 @@ class TestIntegrationValidation:
     def test_empty_default_descriptions(
         self, mocker, repo, field: str, description: str, should_pass: bool
     ):
-        logger_info = mocker.patch.object(logging.getLogger("demisto-sdk"), "info")
         mocker.patch.object(
             IntegrationValidator, "is_valid_category", return_value=True
         )
@@ -1629,14 +1789,19 @@ class TestIntegrationValidation:
         )
         with ChangeCWD(pack.repo_path):
             runner = CliRunner(mix_stderr=False)
-            runner.invoke(
-                main,
-                [VALIDATE_CMD, "-i", integration.yml.rel_path, "--no-docker-checks"],
+            result = runner.invoke(
+                app,
+                [
+                    VALIDATE_CMD,
+                    "--run-old-validate",
+                    "--skip-new-validate",
+                    "-i",
+                    integration.yml.rel_path,
+                    "--no-docker-checks",
+                ],
                 catch_exceptions=False,
             )
-            assert should_pass != str_in_call_args_list(
-                logger_info.call_args_list, "IN149"
-            )
+            assert should_pass != ("IN149" in result.output)
 
 
 class TestPackValidation:
@@ -1651,7 +1816,7 @@ class TestPackValidation:
         Then
         - See that the validation succeed.
         """
-        logger_info = mocker.patch.object(logging.getLogger("demisto-sdk"), "info")
+
         mocker.patch.object(
             ContentEntityValidator, "_load_conf_file", return_value=CONF_JSON_MOCK
         )
@@ -1669,11 +1834,7 @@ class TestPackValidation:
             ContentEntityValidator, "validate_readme_exists", return_value=True
         )
         mocker.patch(
-            "demisto_sdk.commands.common.hook_validations.pack_unique_files.tools.get_current_usecases",
-            return_value=[],
-        )
-        mocker.patch(
-            "demisto_sdk.commands.common.hook_validations.integration.tools.get_current_categories",
+            "demisto_sdk.commands.common.hook_validations.pack_unique_files.get_current_usecases",
             return_value=[],
         )
         mocker.patch(
@@ -1681,17 +1842,25 @@ class TestPackValidation:
             return_value=["Data Enrichment & Threat Intelligence", "Analytics & SIEM"],
         )
         mocker.patch(
-            "demisto_sdk.commands.common.hook_validations.pack_unique_files.tools.get_approved_tags_from_branch",
+            "demisto_sdk.commands.validate.tools.get_approved_tags_from_branch",
             return_value={},
         )
         runner = CliRunner(mix_stderr=False)
-        runner.invoke(
-            main,
-            [VALIDATE_CMD, "-i", VALID_PACK_PATH, "--no-conf-json", "--allow-skipped"],
+        result = runner.invoke(
+            app,
+            [
+                VALIDATE_CMD,
+                "--run-old-validate",
+                "--skip-new-validate",
+                "-i",
+                VALID_PACK_PATH,
+                "--no-conf-json",
+                "--allow-skipped",
+            ],
         )
         assert all(
             [
-                str_in_call_args_list(logger_info.call_args_list, current_str)
+                current_str in result.output
                 for current_str in [
                     f"{VALID_PACK_PATH} unique pack files",
                     f"Validating pack {VALID_PACK_PATH}",
@@ -1714,14 +1883,13 @@ class TestPackValidation:
         - Ensure validation fails.
         - Ensure error message regarding unhandled conditional task in playbook.
         """
-        logger_info = mocker.patch.object(logging.getLogger("demisto-sdk"), "info")
-        logger_error = mocker.patch.object(logging.getLogger("demisto-sdk"), "error")
+
         mocker.patch.object(
             ContentEntityValidator, "_load_conf_file", return_value=CONF_JSON_MOCK
         )
         mocker.patch.object(BaseValidator, "check_file_flags", return_value="")
         mocker.patch(
-            "demisto_sdk.commands.common.hook_validations.pack_unique_files.tools.get_current_usecases",
+            "demisto_sdk.commands.common.hook_validations.pack_unique_files.get_current_usecases",
             return_value=[],
         )
         mocker.patch(
@@ -1729,14 +1897,16 @@ class TestPackValidation:
             return_value=[],
         )
         mocker.patch(
-            "demisto_sdk.commands.common.hook_validations.pack_unique_files.tools.get_approved_tags_from_branch",
+            "demisto_sdk.commands.validate.tools.get_approved_tags_from_branch",
             return_value={},
         )
         runner = CliRunner(mix_stderr=False)
-        runner.invoke(
-            main,
+        result = runner.invoke(
+            app,
             [
                 VALIDATE_CMD,
+                "--run-old-validate",
+                "--skip-new-validate",
                 "-i",
                 AZURE_FEED_PACK_PATH,
                 "--no-conf-json",
@@ -1744,14 +1914,14 @@ class TestPackValidation:
             ],
         )
         assert all(
-            str_in_call_args_list(logger_info.call_args_list, current_str)
+            current_str in result.output
             for current_str in [
                 f"{AZURE_FEED_PACK_PATH}/IncidentFields/incidentfield-city.json",
                 "The files were found as invalid, the exact error message can be located above",
             ]
         )
         assert all(
-            str_in_call_args_list(logger_error.call_args_list, current_str)
+            current_str in result.output
             for current_str in [
                 f"{AZURE_FEED_PACK_PATH}",
                 f"{AZURE_FEED_PACK_PATH}/Integrations/FeedAzure/FeedAzure.yml",
@@ -1771,7 +1941,17 @@ class TestPackValidation:
         - See that the validation failed.
         """
         runner = CliRunner(mix_stderr=False)
-        result = runner.invoke(main, [VALIDATE_CMD, "-i", AZURE_FEED_INVALID_PACK_PATH])
+        result = runner.invoke(
+            app,
+            [
+                VALIDATE_CMD,
+                "--run-old-validate",
+                "--skip-new-validate",
+                "-i",
+                AZURE_FEED_INVALID_PACK_PATH,
+                "--no-conf-json",
+            ],
+        )
         assert "does not exist" in result.stderr
         assert result.exit_code == 2
 
@@ -1788,18 +1968,26 @@ class TestClassifierValidation:
         Then
         - Ensure validate passes.
         """
-        logger_info = mocker.patch.object(logging.getLogger("demisto-sdk"), "info")
+
         mocker.patch.object(tools, "is_external_repository", return_value=True)
         pack = repo.create_pack("PackName")
         classifier = pack.create_classifier("new_classifier", NEW_CLASSIFIER)
         with ChangeCWD(pack.repo_path):
             runner = CliRunner(mix_stderr=False)
             result = runner.invoke(
-                main, [VALIDATE_CMD, "-i", classifier.path], catch_exceptions=False
+                app,
+                [
+                    VALIDATE_CMD,
+                    "-i",
+                    classifier.path,
+                    "--run-old-validate",
+                    "--skip-new-validate",
+                ],
+                catch_exceptions=False,
             )
         assert all(
             [
-                str_in_call_args_list(logger_info.call_args_list, current_str)
+                current_str in result.output
                 for current_str in [
                     f"Validating {classifier.path} as classifier",
                     "The files are valid",
@@ -1819,8 +2007,7 @@ class TestClassifierValidation:
         Then
         - Ensure validate found errors.
         """
-        logger_info = mocker.patch.object(logging.getLogger("demisto-sdk"), "info")
-        logger_error = mocker.patch.object(logging.getLogger("demisto-sdk"), "error")
+
         mocker.patch.object(tools, "is_external_repository", return_value=True)
         pack = repo.create_pack("PackName")
         new_classifier_copy = NEW_CLASSIFIER.copy()
@@ -1828,23 +2015,27 @@ class TestClassifierValidation:
 
         classifier = pack.create_classifier("new_classifier", new_classifier_copy)
         with ChangeCWD(pack.repo_path):
-            runner = CliRunner(mix_stderr=False)
-            result = runner.invoke(
-                main, [VALIDATE_CMD, "-i", classifier.path], catch_exceptions=False
+            result = CliRunner(mix_stderr=False).invoke(
+                app,
+                [
+                    VALIDATE_CMD,
+                    "--run-old-validate",
+                    "--skip-new-validate",
+                    "-i",
+                    classifier.path,
+                ],
+                catch_exceptions=False,
             )
+        assert result.exit_code == 1
         assert all(
             [
-                str_in_call_args_list(logger_info.call_args_list, current_str)
+                current_str in result.output
                 for current_str in [
                     f"Validating {classifier.path} as classifier",
+                    "fromVersion field in new classifiers needs to be higher or equal to 6.0.0",
                 ]
             ]
         )
-        assert str_in_call_args_list(
-            logger_error.call_args_list,
-            "fromVersion field in new classifiers needs to be higher or equal to 6.0.0",
-        )
-        assert result.exit_code == 1
 
     def test_invalid_to_version_in_new_classifiers(self, mocker, repo):
         """
@@ -1857,8 +2048,7 @@ class TestClassifierValidation:
         Then
         - Ensure validate found errors.
         """
-        logger_info = mocker.patch.object(logging.getLogger("demisto-sdk"), "info")
-        logger_error = mocker.patch.object(logging.getLogger("demisto-sdk"), "error")
+
         mocker.patch.object(tools, "is_external_repository", return_value=True)
         pack = repo.create_pack("PackName")
         new_classifier_copy = NEW_CLASSIFIER.copy()
@@ -1867,14 +2057,20 @@ class TestClassifierValidation:
         with ChangeCWD(pack.repo_path):
             runner = CliRunner(mix_stderr=False)
             result = runner.invoke(
-                main, [VALIDATE_CMD, "-i", classifier.path], catch_exceptions=False
+                app,
+                [
+                    VALIDATE_CMD,
+                    "--run-old-validate",
+                    "--skip-new-validate",
+                    "-i",
+                    classifier.path,
+                ],
+                catch_exceptions=False,
             )
-        assert str_in_call_args_list(
-            logger_info.call_args_list, f"Validating {classifier.path} as classifier"
-        )
-        assert str_in_call_args_list(
-            logger_error.call_args_list,
-            "toVersion field in new classifiers needs to be higher than 6.0.0",
+        assert f"Validating {classifier.path} as classifier" in result.output
+        assert (
+            "toVersion field in new classifiers needs to be higher than 6.0.0"
+            in result.output
         )
         assert result.exit_code == 1
 
@@ -1889,8 +2085,7 @@ class TestClassifierValidation:
         Then
         - Ensure validate found errors.
         """
-        logger_info = mocker.patch.object(logging.getLogger("demisto-sdk"), "info")
-        logger_error = mocker.patch.object(logging.getLogger("demisto-sdk"), "error")
+
         mocker.patch.object(tools, "is_external_repository", return_value=True)
         pack = repo.create_pack("PackName")
         new_classifier_copy = NEW_CLASSIFIER.copy()
@@ -1900,14 +2095,20 @@ class TestClassifierValidation:
         with ChangeCWD(pack.repo_path):
             runner = CliRunner(mix_stderr=False)
             result = runner.invoke(
-                main, [VALIDATE_CMD, "-i", classifier.path], catch_exceptions=False
+                app,
+                [
+                    VALIDATE_CMD,
+                    "--run-old-validate",
+                    "--skip-new-validate",
+                    "-i",
+                    classifier.path,
+                ],
+                catch_exceptions=False,
             )
-        assert str_in_call_args_list(
-            logger_info.call_args_list, f"Validating {classifier.path} as classifier"
-        )
-        assert str_in_call_args_list(
-            logger_error.call_args_list,
-            "The `fromVersion` field cannot be higher or equal to the `toVersion` field.",
+        assert f"Validating {classifier.path} as classifier" in result.output
+        assert (
+            "The `fromVersion` field cannot be higher or equal to the `toVersion` field."
+            in result.output
         )
         assert result.exit_code == 1
 
@@ -1922,8 +2123,7 @@ class TestClassifierValidation:
         Then
         - Ensure validate found errors.
         """
-        logger_info = mocker.patch.object(logging.getLogger("demisto-sdk"), "info")
-        logger_error = mocker.patch.object(logging.getLogger("demisto-sdk"), "error")
+
         mocker.patch.object(tools, "is_external_repository", return_value=True)
         pack = repo.create_pack("PackName")
         new_classifier_copy = NEW_CLASSIFIER.copy()
@@ -1932,19 +2132,25 @@ class TestClassifierValidation:
         with ChangeCWD(pack.repo_path):
             runner = CliRunner(mix_stderr=False)
             result = runner.invoke(
-                main, [VALIDATE_CMD, "-i", classifier.path], catch_exceptions=False
+                app,
+                [
+                    VALIDATE_CMD,
+                    "--run-old-validate",
+                    "--skip-new-validate",
+                    "-i",
+                    classifier.path,
+                ],
+                catch_exceptions=False,
             )
         assert all(
             [
-                str_in_call_args_list(logger_info.call_args_list, current_str)
+                current_str in result.output
                 for current_str in [
                     f"Validating {classifier.path} as classifier",
                 ]
             ]
         )
-        assert str_in_call_args_list(
-            logger_error.call_args_list, 'Missing the field "id" in root'
-        )
+        assert 'Missing the field "id" in root' in result.output
         assert result.exit_code == 1
 
     def test_missing_fromversion_field_in_new_classifier(self, mocker, repo):
@@ -1958,8 +2164,7 @@ class TestClassifierValidation:
         Then
         - Ensure validate found errors.
         """
-        logger_info = mocker.patch.object(logging.getLogger("demisto-sdk"), "info")
-        logger_error = mocker.patch.object(logging.getLogger("demisto-sdk"), "error")
+
         mocker.patch.object(tools, "is_external_repository", return_value=True)
         pack = repo.create_pack("PackName")
         new_classifier_copy = NEW_CLASSIFIER.copy()
@@ -1967,21 +2172,26 @@ class TestClassifierValidation:
         classifier = pack.create_classifier("new_classifier", new_classifier_copy)
         with ChangeCWD(pack.repo_path):
             runner = CliRunner(mix_stderr=False)
-            runner.invoke(
-                main, [VALIDATE_CMD, "-i", classifier.path], catch_exceptions=False
+            result = runner.invoke(
+                app,
+                [
+                    VALIDATE_CMD,
+                    "--run-old-validate",
+                    "--skip-new-validate",
+                    "-i",
+                    classifier.path,
+                ],
+                catch_exceptions=False,
             )
         assert all(
             [
-                str_in_call_args_list(logger_info.call_args_list, current_str)
+                current_str in result.output
                 for current_str in [
                     f"Validating {classifier.path} as classifier",
                 ]
             ]
         )
-        assert str_in_call_args_list(
-            logger_error.call_args_list,
-            "Must have fromVersion field in new classifiers",
-        )
+        assert "Must have fromVersion field in new classifiers" in result.output
 
     def test_invalid_type_in_new_classifier(self, mocker, repo):
         """
@@ -1994,7 +2204,7 @@ class TestClassifierValidation:
         Then
         - Ensure validate found errors.
         """
-        logger_error = mocker.patch.object(logging.getLogger("demisto-sdk"), "error")
+
         mocker.patch.object(tools, "is_external_repository", return_value=True)
         pack = repo.create_pack("PackName")
         new_classifier_copy = NEW_CLASSIFIER.copy()
@@ -2003,11 +2213,19 @@ class TestClassifierValidation:
         with ChangeCWD(pack.repo_path):
             runner = CliRunner(mix_stderr=False)
             result = runner.invoke(
-                main, [VALIDATE_CMD, "-i", classifier.path], catch_exceptions=False
+                app,
+                [
+                    VALIDATE_CMD,
+                    "--run-old-validate",
+                    "--skip-new-validate",
+                    "-i",
+                    classifier.path,
+                ],
+                catch_exceptions=False,
             )
-        assert str_in_call_args_list(
-            logger_error.call_args_list,
-            "[BA102] - File PackName/Classifiers/classifier-new_classifier.json",
+        assert (
+            "[BA102] - File PackName/Classifiers/classifier-new_classifier.json"
+            in result.output
         )
         assert result.exit_code == 1
 
@@ -2022,7 +2240,7 @@ class TestClassifierValidation:
         Then
         - Ensure validate passes.
         """
-        logger_info = mocker.patch.object(logging.getLogger("demisto-sdk"), "info")
+
         mocker.patch.object(tools, "is_external_repository", return_value=True)
         mocker.patch.object(
             ClassifierValidator, "is_incident_field_exist", return_value=True
@@ -2032,12 +2250,20 @@ class TestClassifierValidation:
         with ChangeCWD(pack.repo_path):
             runner = CliRunner(mix_stderr=False)
             result = runner.invoke(
-                main, [VALIDATE_CMD, "-i", classifier.path], catch_exceptions=False
+                app,
+                [
+                    VALIDATE_CMD,
+                    "--run-old-validate",
+                    "--skip-new-validate",
+                    "-i",
+                    classifier.path,
+                ],
+                catch_exceptions=False,
             )
         assert result.exit_code == 0
         assert all(
             [
-                str_in_call_args_list(logger_info.call_args_list, current_str)
+                current_str in result.output
                 for current_str in [
                     f"Validating {classifier.path} as classifier_5_9_9",
                     "The files are valid",
@@ -2056,8 +2282,7 @@ class TestClassifierValidation:
         Then
         - Ensure validate found errors.
         """
-        logger_info = mocker.patch.object(logging.getLogger("demisto-sdk"), "info")
-        logger_error = mocker.patch.object(logging.getLogger("demisto-sdk"), "error")
+
         mocker.patch.object(tools, "is_external_repository", return_value=True)
         pack = repo.create_pack("PackName")
         old_classifier_copy = OLD_CLASSIFIER.copy()
@@ -2065,21 +2290,28 @@ class TestClassifierValidation:
         classifier = pack.create_classifier("old_classifier", old_classifier_copy)
         with ChangeCWD(pack.repo_path):
             runner = CliRunner(mix_stderr=False)
-            runner.invoke(
-                main, [VALIDATE_CMD, "-i", classifier.path], catch_exceptions=False
+            result = runner.invoke(
+                app,
+                [
+                    VALIDATE_CMD,
+                    "--run-old-validate",
+                    "--skip-new-validate",
+                    "-i",
+                    classifier.path,
+                ],
+                catch_exceptions=False,
             )
         assert all(
             [
-                str_in_call_args_list(logger_info.call_args_list, current_str)
+                current_str in result.output
                 for current_str in [
                     f"Validating {classifier.path} as classifier_5_9_9",
                 ]
             ]
         )
-        assert str_in_call_args_list(
-            logger_error.call_args_list,
-            "fromVersion field in old classifiers needs to be lower than 6.0.0",
-        )
+        assert (
+            "fromVersion field in old classifiers needs to be lower than 6.0.0"
+        ) in result.output
 
     def test_invalid_to_version_in_old_classifiers(self, mocker, repo):
         """
@@ -2092,7 +2324,7 @@ class TestClassifierValidation:
         Then
         - Ensure validate found errors.
         """
-        logger_info = mocker.patch.object(logging.getLogger("demisto-sdk"), "info")
+
         mocker.patch.object(tools, "is_external_repository", return_value=True)
         pack = repo.create_pack("PackName")
         old_classifier_copy = OLD_CLASSIFIER.copy()
@@ -2101,11 +2333,19 @@ class TestClassifierValidation:
         with ChangeCWD(pack.repo_path):
             runner = CliRunner(mix_stderr=False)
             result = runner.invoke(
-                main, [VALIDATE_CMD, "-i", classifier.path], catch_exceptions=False
+                app,
+                [
+                    VALIDATE_CMD,
+                    "--run-old-validate",
+                    "--skip-new-validate",
+                    "-i",
+                    classifier.path,
+                ],
+                catch_exceptions=False,
             )
         assert all(
             [
-                str_in_call_args_list(logger_info.call_args_list, current_str)
+                current_str in result.output
                 for current_str in [
                     f"Validating {classifier.path} as classifier_5_9_9",
                     f"Validating {classifier.path} as classifier_5_9_9",
@@ -2125,8 +2365,7 @@ class TestClassifierValidation:
         Then
         - Ensure validate found errors.
         """
-        logger_info = mocker.patch.object(logging.getLogger("demisto-sdk"), "info")
-        logger_error = mocker.patch.object(logging.getLogger("demisto-sdk"), "error")
+
         mocker.patch.object(tools, "is_external_repository", return_value=True)
         pack = repo.create_pack("PackName")
         old_classifier_copy = OLD_CLASSIFIER.copy()
@@ -2135,19 +2374,25 @@ class TestClassifierValidation:
         with ChangeCWD(pack.repo_path):
             runner = CliRunner(mix_stderr=False)
             result = runner.invoke(
-                main, [VALIDATE_CMD, "-i", classifier.path], catch_exceptions=False
+                app,
+                [
+                    VALIDATE_CMD,
+                    "--run-old-validate",
+                    "--skip-new-validate",
+                    "-i",
+                    classifier.path,
+                ],
+                catch_exceptions=False,
             )
         assert all(
             [
-                str_in_call_args_list(logger_info.call_args_list, current_str)
+                current_str in result.output
                 for current_str in [
                     f"Validating {classifier.path} as classifier_5_9_9",
                 ]
             ]
         )
-        assert str_in_call_args_list(
-            logger_error.call_args_list, 'Missing the field "id" in root'
-        )
+        assert ('Missing the field "id" in root') in result.output
         assert result.exit_code == 1
 
     def test_missing_toversion_field_in_old_classifier(self, mocker, repo):
@@ -2161,8 +2406,7 @@ class TestClassifierValidation:
         Then
         - Ensure validate found errors.
         """
-        logger_info = mocker.patch.object(logging.getLogger("demisto-sdk"), "info")
-        logger_error = mocker.patch.object(logging.getLogger("demisto-sdk"), "error")
+
         mocker.patch.object(tools, "is_external_repository", return_value=True)
         pack = repo.create_pack("PackName")
         old_classifier_copy = OLD_CLASSIFIER.copy()
@@ -2171,19 +2415,25 @@ class TestClassifierValidation:
         with ChangeCWD(pack.repo_path):
             runner = CliRunner(mix_stderr=False)
             result = runner.invoke(
-                main, [VALIDATE_CMD, "-i", classifier.path], catch_exceptions=False
+                app,
+                [
+                    VALIDATE_CMD,
+                    "--run-old-validate",
+                    "--skip-new-validate",
+                    "-i",
+                    classifier.path,
+                ],
+                catch_exceptions=False,
             )
         assert all(
             [
-                str_in_call_args_list(logger_info.call_args_list, current_str)
+                current_str in result.output
                 for current_str in [
                     f"Validating {classifier.path} as classifier_5_9_9",
                 ]
             ]
         )
-        assert str_in_call_args_list(
-            logger_error.call_args_list, "Must have toVersion field in old classifiers"
-        )
+        assert ("Must have toVersion field in old classifiers") in result.output
         assert result.exit_code == 1
 
 
@@ -2199,7 +2449,7 @@ class TestMapperValidation:
         Then
         - Ensure validate passes.
         """
-        logger_info = mocker.patch.object(logging.getLogger("demisto-sdk"), "info")
+
         mocker.patch.object(tools, "is_external_repository", return_value=True)
         mocker.patch.object(
             MapperValidator, "is_incident_field_exist", return_value=True
@@ -2209,11 +2459,19 @@ class TestMapperValidation:
         with ChangeCWD(pack.repo_path):
             runner = CliRunner(mix_stderr=False)
             result = runner.invoke(
-                main, [VALIDATE_CMD, "-i", mapper.path], catch_exceptions=False
+                app,
+                [
+                    VALIDATE_CMD,
+                    "--run-old-validate",
+                    "--skip-new-validate",
+                    "-i",
+                    mapper.path,
+                ],
+                catch_exceptions=False,
             )
         assert all(
             [
-                str_in_call_args_list(logger_info.call_args_list, current_str)
+                current_str in result.output
                 for current_str in [
                     f"Validating {mapper.path} as mapper",
                     "The files are valid",
@@ -2233,8 +2491,7 @@ class TestMapperValidation:
         Then
         - Ensure validate found errors.
         """
-        logger_info = mocker.patch.object(logging.getLogger("demisto-sdk"), "info")
-        logger_error = mocker.patch.object(logging.getLogger("demisto-sdk"), "error")
+
         mocker.patch.object(tools, "is_external_repository", return_value=True)
         pack = repo.create_pack("PackName")
         mapper_copy = MAPPER.copy()
@@ -2243,20 +2500,27 @@ class TestMapperValidation:
         with ChangeCWD(pack.repo_path):
             runner = CliRunner(mix_stderr=False)
             result = runner.invoke(
-                main, [VALIDATE_CMD, "-i", mapper.path], catch_exceptions=False
+                app,
+                [
+                    VALIDATE_CMD,
+                    "--run-old-validate",
+                    "--skip-new-validate",
+                    "-i",
+                    mapper.path,
+                ],
+                catch_exceptions=False,
             )
         assert all(
             [
-                str_in_call_args_list(logger_info.call_args_list, current_str)
+                current_str in result.output
                 for current_str in [
                     f"Validating {mapper.path} as mapper",
                 ]
             ]
         )
-        assert str_in_call_args_list(
-            logger_error.call_args_list,
-            "fromVersion field in mapper needs to be higher or equal to 6.0.0",
-        )
+        assert (
+            "fromVersion field in mapper needs to be higher or equal to 6.0.0"
+        ) in result.output
         assert result.exit_code == 1
 
     def test_invalid_to_version_in_mapper(self, mocker, repo):
@@ -2270,8 +2534,7 @@ class TestMapperValidation:
         Then
         - Ensure validate found errors.
         """
-        logger_info = mocker.patch.object(logging.getLogger("demisto-sdk"), "info")
-        logger_error = mocker.patch.object(logging.getLogger("demisto-sdk"), "error")
+
         mocker.patch.object(tools, "is_external_repository", return_value=True)
         pack = repo.create_pack("PackName")
         mapper_copy = MAPPER.copy()
@@ -2280,14 +2543,19 @@ class TestMapperValidation:
         with ChangeCWD(pack.repo_path):
             runner = CliRunner(mix_stderr=False)
             result = runner.invoke(
-                main, [VALIDATE_CMD, "-i", mapper.path], catch_exceptions=False
+                app,
+                [
+                    VALIDATE_CMD,
+                    "--run-old-validate",
+                    "--skip-new-validate",
+                    "-i",
+                    mapper.path,
+                ],
+                catch_exceptions=False,
             )
-        assert str_in_call_args_list(
-            logger_info.call_args_list, f"Validating {mapper.path} as mapper"
-        )
-        assert str_in_call_args_list(
-            logger_error.call_args_list,
-            "toVersion field in mapper needs to be higher than 6.0.0",
+        assert f"Validating {mapper.path} as mapper" in result.output
+        assert (
+            "toVersion field in mapper needs to be higher than 6.0.0" in result.output
         )
         assert result.exit_code == 1
 
@@ -2302,8 +2570,7 @@ class TestMapperValidation:
         Then
         - Ensure validate found errors.
         """
-        logger_info = mocker.patch.object(logging.getLogger("demisto-sdk"), "info")
-        logger_error = mocker.patch.object(logging.getLogger("demisto-sdk"), "error")
+
         mocker.patch.object(tools, "is_external_repository", return_value=True)
         pack = repo.create_pack("PackName")
         mapper_copy = MAPPER.copy()
@@ -2312,19 +2579,25 @@ class TestMapperValidation:
         with ChangeCWD(pack.repo_path):
             runner = CliRunner(mix_stderr=False)
             result = runner.invoke(
-                main, [VALIDATE_CMD, "-i", mapper.path], catch_exceptions=False
+                app,
+                [
+                    VALIDATE_CMD,
+                    "--run-old-validate",
+                    "--skip-new-validate",
+                    "-i",
+                    mapper.path,
+                ],
+                catch_exceptions=False,
             )
         assert all(
             [
-                str_in_call_args_list(logger_info.call_args_list, current_str)
+                current_str in result.output
                 for current_str in [
                     f"Validating {mapper.path} as mapper",
                 ]
             ]
         )
-        assert str_in_call_args_list(
-            logger_error.call_args_list, 'Missing the field "id" in root'
-        )
+        assert ('Missing the field "id" in root') in result.output
         assert result.exit_code == 1
 
     def test_mapper_from_version_higher_to_version(self, mocker, repo):
@@ -2338,8 +2611,7 @@ class TestMapperValidation:
         Then
         - Ensure validate found errors.
         """
-        logger_info = mocker.patch.object(logging.getLogger("demisto-sdk"), "info")
-        logger_error = mocker.patch.object(logging.getLogger("demisto-sdk"), "error")
+
         mocker.patch.object(tools, "is_external_repository", return_value=True)
         pack = repo.create_pack("PackName")
         mapper_copy = MAPPER.copy()
@@ -2349,14 +2621,20 @@ class TestMapperValidation:
         with ChangeCWD(pack.repo_path):
             runner = CliRunner(mix_stderr=False)
             result = runner.invoke(
-                main, [VALIDATE_CMD, "-i", mapper.path], catch_exceptions=False
+                app,
+                [
+                    VALIDATE_CMD,
+                    "--run-old-validate",
+                    "--skip-new-validate",
+                    "-i",
+                    mapper.path,
+                ],
+                catch_exceptions=False,
             )
-        assert str_in_call_args_list(
-            logger_info.call_args_list, f"Validating {mapper.path} as mapper"
-        )
-        assert str_in_call_args_list(
-            logger_error.call_args_list,
-            "The `fromVersion` field cannot be higher or equal to the `toVersion` field.",
+        assert f"Validating {mapper.path} as mapper" in result.output
+        assert (
+            "The `fromVersion` field cannot be higher or equal to the `toVersion` field."
+            in result.output
         )
         assert result.exit_code == 1
 
@@ -2371,7 +2649,7 @@ class TestMapperValidation:
         Then
         - Ensure validate found errors.
         """
-        logger_info = mocker.patch.object(logging.getLogger("demisto-sdk"), "info")
+
         mocker.patch.object(tools, "is_external_repository", return_value=True)
         pack = repo.create_pack("PackName")
         mapper_copy = MAPPER.copy()
@@ -2380,11 +2658,19 @@ class TestMapperValidation:
         with ChangeCWD(pack.repo_path):
             runner = CliRunner(mix_stderr=False)
             result = runner.invoke(
-                main, [VALIDATE_CMD, "-i", mapper.path], catch_exceptions=False
+                app,
+                [
+                    VALIDATE_CMD,
+                    "--run-old-validate",
+                    "--skip-new-validate",
+                    "-i",
+                    mapper.path,
+                ],
+                catch_exceptions=False,
             )
-        str_in_call_args_list(
-            logger_info.call_args_list,
-            "[BA102] - File PackName/Classifiers/classifier-mapper-mapper.json is not supported",
+        assert (
+            "[BA102] - File PackName/Classifiers/classifier-mapper-mapper.json is not supported"
+            in result.output
         )
         assert result.exit_code == 1
 
@@ -2401,18 +2687,26 @@ class TestDashboardValidation:
         Then
         - Ensure validate passes and identifies the file as a dashboard.
         """
-        logger_info = mocker.patch.object(logging.getLogger("demisto-sdk"), "info")
+
         mocker.patch.object(tools, "is_external_repository", return_value=True)
         pack = repo.create_pack("PackName")
         dashboard = pack.create_dashboard("dashboard", DASHBOARD)
         with ChangeCWD(pack.repo_path):
             runner = CliRunner(mix_stderr=False)
             result = runner.invoke(
-                main, [VALIDATE_CMD, "-i", dashboard.path], catch_exceptions=False
+                app,
+                [
+                    VALIDATE_CMD,
+                    "--run-old-validate",
+                    "--skip-new-validate",
+                    "-i",
+                    dashboard.path,
+                ],
+                catch_exceptions=False,
             )
         assert all(
             [
-                str_in_call_args_list(logger_info.call_args_list, current_str)
+                current_str in result.output
                 for current_str in [
                     f"Validating {dashboard.path} as dashboard",
                     "The files are valid",
@@ -2432,105 +2726,30 @@ class TestDashboardValidation:
         Then
         - Ensure validate fails on - BA100 wrong version error.
         """
-        logger_info = mocker.patch.object(logging.getLogger("demisto-sdk"), "info")
-        logger_error = mocker.patch.object(logging.getLogger("demisto-sdk"), "error")
+
         mocker.patch.object(tools, "is_external_repository", return_value=True)
         pack = repo.create_pack("PackName")
         dashboard_copy = DASHBOARD.copy()
         dashboard_copy["version"] = 1
         dashboard = pack.create_dashboard("dashboard", dashboard_copy)
         with ChangeCWD(pack.repo_path):
-            runner = CliRunner(mix_stderr=False)
-            result = runner.invoke(
-                main, [VALIDATE_CMD, "-i", dashboard.path], catch_exceptions=False
+            result = CliRunner(mix_stderr=False).invoke(
+                app,
+                [
+                    VALIDATE_CMD,
+                    "--run-old-validate",
+                    "--skip-new-validate",
+                    "-i",
+                    dashboard.path,
+                ],
+                catch_exceptions=False,
             )
-        assert all(
-            [
-                str_in_call_args_list(logger_info.call_args_list, current_str)
-                for current_str in [
-                    f"Validating {dashboard.path} as dashboard",
-                    "BA100",
-                ]
-            ]
-        )
-        assert str_in_call_args_list(
-            logger_error.call_args_list,
-            "The version for our files should always be -1, please update the file.",
-        )
         assert result.exit_code == 1
-
-
-class TestConnectionValidation:
-    def test_valid_connection(self, mocker, repo):
-        """
-        Given
-        - a valid Connection.
-
-        When
-        - Running validate on it.
-
-        Then
-        - Ensure validate passes and identifies the file as a connection.
-        """
-        logger_info = mocker.patch.object(logging.getLogger("demisto-sdk"), "info")
-        mocker.patch.object(tools, "is_external_repository", return_value=True)
-        pack = repo.create_pack("PackName")
-        connection = pack._create_json_based(
-            name="connection", prefix="", content=CONNECTION
-        )
-        with ChangeCWD(pack.repo_path):
-            runner = CliRunner(mix_stderr=False)
-            result = runner.invoke(
-                main, [VALIDATE_CMD, "-i", connection.path], catch_exceptions=False
-            )
-        assert all(
-            [
-                str_in_call_args_list(logger_info.call_args_list, current_str)
-                for current_str in [
-                    f"Validating {connection.path} as canvas-context-connections",
-                    "The files are valid",
-                ]
-            ]
-        )
-        assert result.exit_code == 0
-
-    def test_invalid_connection(self, mocker, repo):
-        """
-        Given
-        - an invalid Connection - no contextKey1 in a connection.
-
-        When
-        - Running validate on it.
-
-        Then
-        - Ensure validate fails on missing contextKey1.
-        """
-        logger_info = mocker.patch.object(logging.getLogger("demisto-sdk"), "info")
-        logger_error = mocker.patch.object(logging.getLogger("demisto-sdk"), "error")
-        mocker.patch.object(tools, "is_external_repository", return_value=True)
-        pack = repo.create_pack("PackName")
-        connection_copy = CONNECTION.copy()
-        del connection_copy["canvasContextConnections"][0]["contextKey1"]
-        connection = pack._create_json_based(
-            name="connection", prefix="", content=connection_copy
-        )
-        with ChangeCWD(pack.repo_path):
-            runner = CliRunner(mix_stderr=False)
-            result = runner.invoke(
-                main, [VALIDATE_CMD, "-i", connection.path], catch_exceptions=False
-            )
-        assert all(
-            [
-                str_in_call_args_list(logger_info.call_args_list, current_str)
-                for current_str in [
-                    f"Validating {connection.path} as canvas-context-connections",
-                ]
-            ]
-        )
-        assert str_in_call_args_list(
-            logger_error.call_args_list, 'Missing the field "contextKey1"'
-        )
-        assert result.exit_code == 1
+        assert f"Validating {dashboard.path} as dashboard" in result.output
+        assert "BA100" in result.output
+        assert (
+            "The version for our files should always be -1, please update the file."
+        ) in result.output
 
 
 class TestIndicatorFieldValidation:
@@ -2545,7 +2764,7 @@ class TestIndicatorFieldValidation:
         Then
         - Ensure validate passes and identifies the file as an indicator field.
         """
-        logger_info = mocker.patch.object(logging.getLogger("demisto-sdk"), "info")
+
         mocker.patch.object(tools, "is_external_repository", return_value=True)
         pack = repo.create_pack("PackName")
         pack.create_indicator_field("indicator-field", INDICATOR_FIELD)
@@ -2553,11 +2772,19 @@ class TestIndicatorFieldValidation:
         with ChangeCWD(pack.repo_path):
             runner = CliRunner(mix_stderr=False)
             result = runner.invoke(
-                main, [VALIDATE_CMD, "-i", indicator_field_path], catch_exceptions=False
+                app,
+                [
+                    VALIDATE_CMD,
+                    "--run-old-validate",
+                    "--skip-new-validate",
+                    "-i",
+                    indicator_field_path,
+                ],
+                catch_exceptions=False,
             )
         assert all(
             [
-                str_in_call_args_list(logger_info.call_args_list, current_str)
+                current_str in result.output
                 for current_str in [
                     f"Validating {indicator_field_path} as indicatorfield",
                     "The files are valid",
@@ -2577,8 +2804,7 @@ class TestIndicatorFieldValidation:
         Then
         - Ensure validate fails on IF101 wrong content key value error.
         """
-        logger_info = mocker.patch.object(logging.getLogger("demisto-sdk"), "info")
-        logger_error = mocker.patch.object(logging.getLogger("demisto-sdk"), "error")
+
         mocker.patch.object(tools, "is_external_repository", return_value=True)
         pack = repo.create_pack("PackName")
         indicator_field_copy = INDICATOR_FIELD.copy()
@@ -2588,20 +2814,26 @@ class TestIndicatorFieldValidation:
         with ChangeCWD(pack.repo_path):
             runner = CliRunner(mix_stderr=False)
             result = runner.invoke(
-                main, [VALIDATE_CMD, "-i", indicator_field_path], catch_exceptions=False
+                app,
+                [
+                    VALIDATE_CMD,
+                    "--run-old-validate",
+                    "--skip-new-validate",
+                    "-i",
+                    indicator_field_path,
+                ],
+                catch_exceptions=False,
             )
         assert all(
             [
-                str_in_call_args_list(logger_info.call_args_list, current_str)
+                current_str in result.output
                 for current_str in [
                     f"Validating {indicator_field_path} as indicatorfield",
                     "IF101",
                 ]
             ]
         )
-        assert str_in_call_args_list(
-            logger_error.call_args_list, "The content key must be set to True."
-        )
+        assert ("The content key must be set to True.") in result.output
         assert result.exit_code == 1
 
 
@@ -2617,18 +2849,26 @@ class TestIncidentTypeValidation:
         Then
         - Ensure validate passes and identifies the file as an incident type.
         """
-        logger_info = mocker.patch.object(logging.getLogger("demisto-sdk"), "info")
+
         mocker.patch.object(tools, "is_external_repository", return_value=True)
         pack = repo.create_pack("PackName")
         incident_type = pack.create_incident_type("incident_type", INCIDENT_TYPE)
         with ChangeCWD(pack.repo_path):
             runner = CliRunner(mix_stderr=False)
             result = runner.invoke(
-                main, [VALIDATE_CMD, "-i", incident_type.path], catch_exceptions=False
+                app,
+                [
+                    VALIDATE_CMD,
+                    "--run-old-validate",
+                    "--skip-new-validate",
+                    "-i",
+                    incident_type.path,
+                ],
+                catch_exceptions=False,
             )
         assert all(
             [
-                str_in_call_args_list(logger_info.call_args_list, current_str)
+                current_str in result.output
                 for current_str in [
                     f"Validating {incident_type.path} as incidenttype",
                     "The files are valid",
@@ -2648,8 +2888,7 @@ class TestIncidentTypeValidation:
         Then
         - Ensure validate fails on IT100 wrong integer value in field.
         """
-        logger_info = mocker.patch.object(logging.getLogger("demisto-sdk"), "info")
-        logger_error = mocker.patch.object(logging.getLogger("demisto-sdk"), "error")
+
         mocker.patch.object(tools, "is_external_repository", return_value=True)
         pack = repo.create_pack("PackName")
         incident_type_copy = INCIDENT_TYPE.copy()
@@ -2658,15 +2897,20 @@ class TestIncidentTypeValidation:
         with ChangeCWD(pack.repo_path):
             runner = CliRunner(mix_stderr=False)
             result = runner.invoke(
-                main, [VALIDATE_CMD, "-i", incident_type.path], catch_exceptions=False
+                app,
+                [
+                    VALIDATE_CMD,
+                    "--run-old-validate",
+                    "--skip-new-validate",
+                    "-i",
+                    incident_type.path,
+                ],
+                catch_exceptions=False,
             )
-        assert str_in_call_args_list(
-            logger_info.call_args_list,
-            f"Validating {incident_type.path} as incidenttype",
-        )
+        assert f"Validating {incident_type.path} as incidenttype" in result.output
         assert all(
             [
-                str_in_call_args_list(logger_error.call_args_list, current_str)
+                current_str in result.output
                 for current_str in [
                     "IT100",
                     "The field days needs to be a positive integer",
@@ -2686,7 +2930,7 @@ class TestIncidentTypeValidation:
         Then
         - Ensure validate passes and identifies the file as an incident type.
         """
-        logger_info = mocker.patch.object(logging.getLogger("demisto-sdk"), "info")
+
         mocker.patch.object(tools, "is_external_repository", return_value=True)
         pack = repo.create_pack("PackName")
         incident_type_data = INCIDENT_TYPE.copy()
@@ -2719,11 +2963,19 @@ class TestIncidentTypeValidation:
         with ChangeCWD(pack.repo_path):
             runner = CliRunner(mix_stderr=False)
             result = runner.invoke(
-                main, [VALIDATE_CMD, "-i", incident_type.path], catch_exceptions=False
+                app,
+                [
+                    VALIDATE_CMD,
+                    "--run-old-validate",
+                    "--skip-new-validate",
+                    "-i",
+                    incident_type.path,
+                ],
+                catch_exceptions=False,
             )
         assert all(
             [
-                str_in_call_args_list(logger_info.call_args_list, current_str)
+                current_str in result.output
                 for current_str in [
                     f"Validating {incident_type.path} as incidenttype",
                     "The files are valid",
@@ -2747,8 +2999,7 @@ class TestIncidentTypeValidation:
         - Ensure all wrongly formatted extraction incident fields are listed in the output.
         - Ensure all valid extraction fields are not listed
         """
-        logger_info = mocker.patch.object(logging.getLogger("demisto-sdk"), "info")
-        logger_error = mocker.patch.object(logging.getLogger("demisto-sdk"), "error")
+
         mocker.patch.object(tools, "is_external_repository", return_value=True)
         pack = repo.create_pack("PackName")
         incident_type_data = INCIDENT_TYPE.copy()
@@ -2781,25 +3032,30 @@ class TestIncidentTypeValidation:
         with ChangeCWD(pack.repo_path):
             runner = CliRunner(mix_stderr=False)
             result = runner.invoke(
-                main, [VALIDATE_CMD, "-i", incident_type.path], catch_exceptions=False
+                app,
+                [
+                    VALIDATE_CMD,
+                    "--run-old-validate",
+                    "--skip-new-validate",
+                    "-i",
+                    incident_type.path,
+                ],
+                catch_exceptions=False,
             )
-        assert str_in_call_args_list(
-            logger_info.call_args_list,
-            f"Validating {incident_type.path} as incidenttype",
-        )
         assert all(
             [
-                str_in_call_args_list(logger_error.call_args_list, current_str)
+                current_str in result.output
                 for current_str in [
                     "IT102",
                     "attachment",
                     "category",
                     "closenotes",
+                    f"Validating {incident_type.path} as incidenttype",
                 ]
             ]
         )
         # sanity check
-        assert not str_in_call_args_list(logger_info.call_args_list, "closinguserid")
+        assert "closinguserid" not in result.output
         assert result.exit_code == 1
 
     def test_invalid_incident_type_with_extract_fields_invalid_mode(self, mocker, repo):
@@ -2813,8 +3069,7 @@ class TestIncidentTypeValidation:
         Then
         - Ensure validate fails on IT103.
         """
-        logger_info = mocker.patch.object(logging.getLogger("demisto-sdk"), "info")
-        logger_error = mocker.patch.object(logging.getLogger("demisto-sdk"), "error")
+
         mocker.patch.object(tools, "is_external_repository", return_value=True)
         pack = repo.create_pack("PackName")
         incident_type_data = INCIDENT_TYPE.copy()
@@ -2847,21 +3102,26 @@ class TestIncidentTypeValidation:
         with ChangeCWD(pack.repo_path):
             runner = CliRunner(mix_stderr=False)
             result = runner.invoke(
-                main, [VALIDATE_CMD, "-i", incident_type.path], catch_exceptions=False
+                app,
+                [
+                    VALIDATE_CMD,
+                    "--run-old-validate",
+                    "--skip-new-validate",
+                    "-i",
+                    incident_type.path,
+                ],
+                catch_exceptions=False,
             )
-        assert str_in_call_args_list(
-            logger_info.call_args_list,
-            f"Validating {incident_type.path} as incidenttype",
-        )
         assert all(
             [
-                str_in_call_args_list(logger_error.call_args_list, current_str)
+                current_str in result.output
                 for current_str in [
                     "IT103",
                     "The `mode` field under `extractSettings` should be one of the following:",
                     ' - "All" - To extract all indicator types regardless of auto-extraction settings.',
                     ' - "Specific" - To extract only the specific indicator types ',
                     "set in the auto-extraction settings.",
+                    f"Validating {incident_type.path} as incidenttype",
                 ]
             ]
         )
@@ -2933,18 +3193,26 @@ class TestLayoutValidation:
         Then
         - Ensure validate passes and identifies the file as a layout.
         """
-        logger_info = mocker.patch.object(logging.getLogger("demisto-sdk"), "info")
+
         mocker.patch.object(tools, "is_external_repository", return_value=True)
         pack = repo.create_pack("PackName")
         layout = pack._create_json_based(name="layout-name", prefix="", content=LAYOUT)
         with ChangeCWD(pack.repo_path):
             runner = CliRunner(mix_stderr=False)
             result = runner.invoke(
-                main, [VALIDATE_CMD, "-i", layout.path], catch_exceptions=False
+                app,
+                [
+                    VALIDATE_CMD,
+                    "--run-old-validate",
+                    "--skip-new-validate",
+                    "-i",
+                    layout.path,
+                ],
+                catch_exceptions=False,
             )
         assert all(
             [
-                str_in_call_args_list(logger_info.call_args_list, current_str)
+                current_str in result.output
                 for current_str in [
                     f"Validating {layout.path} as layout",
                     "The files are valid",
@@ -2964,8 +3232,7 @@ class TestLayoutValidation:
         Then
         - Ensure validate fails on - BA100 wrong version error.
         """
-        logger_info = mocker.patch.object(logging.getLogger("demisto-sdk"), "info")
-        logger_error = mocker.patch.object(logging.getLogger("demisto-sdk"), "error")
+
         mocker.patch.object(tools, "is_external_repository", return_value=True)
         pack = repo.create_pack("PackName")
         layout_copy = LAYOUT.copy()
@@ -2976,20 +3243,25 @@ class TestLayoutValidation:
         with ChangeCWD(pack.repo_path):
             runner = CliRunner(mix_stderr=False)
             result = runner.invoke(
-                main, [VALIDATE_CMD, "-i", layout.path], catch_exceptions=False
+                app,
+                [
+                    VALIDATE_CMD,
+                    "--run-old-validate",
+                    "--skip-new-validate",
+                    "-i",
+                    layout.path,
+                ],
+                catch_exceptions=False,
             )
         assert all(
             [
-                str_in_call_args_list(logger_info.call_args_list, current_str)
+                current_str in result.output
                 for current_str in [
                     f"Validating {layout.path} as layout",
                     "BA100",
+                    "The version for our files should always be -1, please update the file.",
                 ]
             ]
-        )
-        assert str_in_call_args_list(
-            logger_error.call_args_list,
-            "The version for our files should always be -1, please update the file.",
         )
         assert result.exit_code == 1
 
@@ -3004,8 +3276,7 @@ class TestLayoutValidation:
         Then
         - Ensure validate fails on - BA100 wrong version error.
         """
-        logger_error = mocker.patch.object(logging.getLogger("demisto-sdk"), "error")
-        logger_info = mocker.patch.object(logging.getLogger("demisto-sdk"), "info")
+
         mocker.patch.object(tools, "is_external_repository", return_value=True)
         pack = repo.create_pack("PackName")
         layout_copy = LAYOUT.copy()
@@ -3016,17 +3287,23 @@ class TestLayoutValidation:
         with ChangeCWD(pack.repo_path):
             runner = CliRunner(mix_stderr=False)
             result = runner.invoke(
-                main, [VALIDATE_CMD, "-i", layout.path], catch_exceptions=False
+                app,
+                [
+                    VALIDATE_CMD,
+                    "--run-old-validate",
+                    "--skip-new-validate",
+                    "-i",
+                    layout.path,
+                ],
+                catch_exceptions=False,
             )
-        assert str_in_call_args_list(
-            logger_info.call_args_list, f"Validating {layout.path} as layout"
-        )
         assert all(
             [
-                str_in_call_args_list(logger_error.call_args_list, current_str)
+                current_str in result.output
                 for current_str in [
                     "LO102",
                     'layout file name should start with "layout-" prefix.',
+                    f"Validating {layout.path} as layout",
                 ]
             ]
         )
@@ -3043,7 +3320,7 @@ class TestLayoutValidation:
         Then
         - Ensure validate passes and identifies the file as a layout.
         """
-        logger_info = mocker.patch.object(logging.getLogger("demisto-sdk"), "info")
+
         mocker.patch.object(tools, "is_external_repository", return_value=True)
         pack = repo.create_pack("PackName")
         layout = pack._create_json_based(
@@ -3052,11 +3329,19 @@ class TestLayoutValidation:
         with ChangeCWD(pack.repo_path):
             runner = CliRunner(mix_stderr=False)
             result = runner.invoke(
-                main, [VALIDATE_CMD, "-i", layout.path], catch_exceptions=False
+                app,
+                [
+                    VALIDATE_CMD,
+                    "--run-old-validate",
+                    "--skip-new-validate",
+                    "-i",
+                    layout.path,
+                ],
+                catch_exceptions=False,
             )
         assert all(
             [
-                str_in_call_args_list(logger_info.call_args_list, current_str)
+                current_str in result.output
                 for current_str in [
                     f"Validating {layout.path} as layoutscontainer",
                     "The files are valid",
@@ -3076,8 +3361,7 @@ class TestLayoutValidation:
         Then
         - Ensure validate fails on - BA100 wrong version error.
         """
-        logger_info = mocker.patch.object(logging.getLogger("demisto-sdk"), "info")
-        logger_error = mocker.patch.object(logging.getLogger("demisto-sdk"), "error")
+
         mocker.patch.object(tools, "is_external_repository", return_value=True)
         pack = repo.create_pack("PackName")
         layout_copy = LAYOUTS_CONTAINER.copy()
@@ -3088,20 +3372,25 @@ class TestLayoutValidation:
         with ChangeCWD(pack.repo_path):
             runner = CliRunner(mix_stderr=False)
             result = runner.invoke(
-                main, [VALIDATE_CMD, "-i", layout.path], catch_exceptions=False
+                app,
+                [
+                    VALIDATE_CMD,
+                    "--run-old-validate",
+                    "--skip-new-validate",
+                    "-i",
+                    layout.path,
+                ],
+                catch_exceptions=False,
             )
         assert all(
             [
-                str_in_call_args_list(logger_info.call_args_list, current_str)
+                current_str in result.output
                 for current_str in [
                     f"Validating {layout.path} as layoutscontainer",
                     "BA100",
+                    "The version for our files should always be -1, please update the file.",
                 ]
             ]
-        )
-        assert str_in_call_args_list(
-            logger_error.call_args_list,
-            "The version for our files should always be -1, please update the file.",
         )
         assert result.exit_code == 1
 
@@ -3116,8 +3405,7 @@ class TestLayoutValidation:
         Then
         - Ensure validate fails on - LO103 wrong file path.
         """
-        logger_info = mocker.patch.object(logging.getLogger("demisto-sdk"), "info")
-        logger_error = mocker.patch.object(logging.getLogger("demisto-sdk"), "error")
+
         mocker.patch.object(tools, "is_external_repository", return_value=True)
         pack = repo.create_pack("PackName")
         layout = pack._create_json_based(
@@ -3126,17 +3414,23 @@ class TestLayoutValidation:
         with ChangeCWD(pack.repo_path):
             runner = CliRunner(mix_stderr=False)
             result = runner.invoke(
-                main, [VALIDATE_CMD, "-i", layout.path], catch_exceptions=False
+                app,
+                [
+                    VALIDATE_CMD,
+                    "--run-old-validate",
+                    "--skip-new-validate",
+                    "-i",
+                    layout.path,
+                ],
+                catch_exceptions=False,
             )
-        assert str_in_call_args_list(
-            logger_info.call_args_list, f"Validating {layout.path} as layoutscontainer"
-        )
         assert all(
             [
-                str_in_call_args_list(logger_error.call_args_list, current_str)
+                current_str in result.output
                 for current_str in [
                     "LO103",
                     'layoutscontainer file name should start with "layoutscontainer-" prefix.',
+                    f"Validating {layout.path} as layoutscontainer",
                 ]
             ]
         )
@@ -3153,8 +3447,7 @@ class TestLayoutValidation:
         Then
         - Ensure validate found errors.
         """
-        logger_info = mocker.patch.object(logging.getLogger("demisto-sdk"), "info")
-        logger_error = mocker.patch.object(logging.getLogger("demisto-sdk"), "error")
+
         mocker.patch.object(tools, "is_external_repository", return_value=True)
         pack = repo.create_pack("PackName")
         layoutscontainer_copy = LAYOUTS_CONTAINER.copy()
@@ -3166,18 +3459,22 @@ class TestLayoutValidation:
         with ChangeCWD(pack.repo_path):
             runner = CliRunner(mix_stderr=False)
             result = runner.invoke(
-                main,
-                [VALIDATE_CMD, "-i", layoutscontainer.path],
+                app,
+                [
+                    VALIDATE_CMD,
+                    "--run-old-validate",
+                    "--skip-new-validate",
+                    "-i",
+                    layoutscontainer.path,
+                ],
                 catch_exceptions=False,
             )
-        str_in_call_args_list(
-            logger_info.call_args_list,
-            f"Validating {layoutscontainer.path} as layoutscontainer",
+        assert (
+            f"Validating {layoutscontainer.path} as layoutscontainer" in result.output
         )
-        str_in_call_args_list(
-            logger_error.call_args_list,
-            "fromVersion field in layoutscontainer needs to be higher or equal to 6.0.0",
-        )
+        assert (
+            "fromVersion field in layoutscontainer needs to be higher or equal to 6.0.0"
+        ) in result.output
 
         assert result.exit_code == 1
 
@@ -3192,8 +3489,7 @@ class TestLayoutValidation:
         Then
         - Ensure validate found errors.
         """
-        logger_info = mocker.patch.object(logging.getLogger("demisto-sdk"), "info")
-        logger_error = mocker.patch.object(logging.getLogger("demisto-sdk"), "error")
+
         mocker.patch.object(tools, "is_external_repository", return_value=True)
         pack = repo.create_pack("PackName")
         layout_copy = LAYOUT.copy()
@@ -3203,15 +3499,18 @@ class TestLayoutValidation:
         with ChangeCWD(pack.repo_path):
             runner = CliRunner(mix_stderr=False)
             result = runner.invoke(
-                main, [VALIDATE_CMD, "-i", layout.path], catch_exceptions=False
+                app,
+                [
+                    VALIDATE_CMD,
+                    "--run-old-validate",
+                    "--skip-new-validate",
+                    "-i",
+                    layout.path,
+                ],
+                catch_exceptions=False,
             )
-        assert str_in_call_args_list(
-            logger_info.call_args_list, f"Validating {layout.path} as layout"
-        )
-        assert str_in_call_args_list(
-            logger_error.call_args_list,
-            "toVersion field in layout needs to be lower than 6.0.0",
-        )
+        assert f"Validating {layout.path} as layout" in result.output
+        assert "toVersion field in layout needs to be lower than 6.0.0" in result.output
         assert result.exit_code == 1
 
     @pytest.mark.parametrize(
@@ -3231,7 +3530,7 @@ class TestLayoutValidation:
         - Ensure validation passes.
         - Ensure success validation message is printed.
         """
-        logger_info = mocker.patch.object(logging.getLogger("demisto-sdk"), "info")
+
         mocker.patch.object(tools, "is_external_repository", return_value=True)
         pack = repo.create_pack("PackName")
         layoutscontainer_copy = LAYOUTS_CONTAINER.copy()
@@ -3258,9 +3557,11 @@ class TestLayoutValidation:
         with ChangeCWD(pack.repo_path):
             runner = CliRunner(mix_stderr=False)
             result = runner.invoke(
-                main,
+                app,
                 [
                     VALIDATE_CMD,
+                    "--run-old-validate",
+                    "--skip-new-validate",
                     "-i",
                     layoutscontainer.path,
                     "-s",
@@ -3272,7 +3573,7 @@ class TestLayoutValidation:
             )
         assert all(
             [
-                str_in_call_args_list(logger_info.call_args_list, current_str)
+                current_str in result.output
                 for current_str in [
                     f"Validating {layoutscontainer.path} as layoutscontainer",
                     "The files are valid",
@@ -3300,8 +3601,7 @@ class TestLayoutValidation:
         Then
         - Ensure validation fails on LO105 - layouts container non existent script id
         """
-        logger_info = mocker.patch.object(logging.getLogger("demisto-sdk"), "info")
-        logger_error = mocker.patch.object(logging.getLogger("demisto-sdk"), "error")
+
         mocker.patch.object(tools, "is_external_repository", return_value=True)
         pack = repo.create_pack("PackName")
         layoutscontainer_copy = LAYOUTS_CONTAINER.copy()
@@ -3328,9 +3628,11 @@ class TestLayoutValidation:
         with ChangeCWD(pack.repo_path):
             runner = CliRunner(mix_stderr=False)
             result = runner.invoke(
-                main,
+                app,
                 [
                     VALIDATE_CMD,
+                    "--run-old-validate",
+                    "--skip-new-validate",
                     "-i",
                     layoutscontainer.path,
                     "-s",
@@ -3342,16 +3644,13 @@ class TestLayoutValidation:
             )
         assert all(
             [
-                str_in_call_args_list(logger_info.call_args_list, current_str)
+                current_str in result.output
                 for current_str in [
                     f"Validating {layoutscontainer.path} as layoutscontainer",
                     "LO105",
+                    "the following scripts were not found in the id_set.json",
                 ]
             ]
-        )
-        assert str_in_call_args_list(
-            logger_error.call_args_list,
-            "the following scripts were not found in the id_set.json",
         )
         assert result.exit_code == 1
 
@@ -3372,7 +3671,7 @@ class TestLayoutValidation:
         - Ensure validation passes.
         - Ensure success validation message is printed.
         """
-        logger_info = mocker.patch.object(logging.getLogger("demisto-sdk"), "info")
+
         mocker.patch.object(tools, "is_external_repository", return_value=True)
         pack = repo.create_pack("PackName")
         layout_copy = LAYOUT.copy()
@@ -3397,9 +3696,11 @@ class TestLayoutValidation:
         with ChangeCWD(pack.repo_path):
             runner = CliRunner(mix_stderr=False)
             result = runner.invoke(
-                main,
+                app,
                 [
                     VALIDATE_CMD,
+                    "--run-old-validate",
+                    "--skip-new-validate",
                     "-i",
                     layout.path,
                     "-s",
@@ -3411,7 +3712,7 @@ class TestLayoutValidation:
             )
         assert all(
             [
-                str_in_call_args_list(logger_info.call_args_list, current_str)
+                current_str in result.output
                 for current_str in [
                     f"Validating {layout.path} as layout",
                     "The files are valid",
@@ -3436,8 +3737,7 @@ class TestLayoutValidation:
         Then
         - Ensure validation fails on LO106 - layout non existent script id
         """
-        logger_info = mocker.patch.object(logging.getLogger("demisto-sdk"), "info")
-        logger_error = mocker.patch.object(logging.getLogger("demisto-sdk"), "error")
+
         mocker.patch.object(tools, "is_external_repository", return_value=True)
         pack = repo.create_pack("PackName")
         layout_copy = LAYOUT.copy()
@@ -3462,9 +3762,11 @@ class TestLayoutValidation:
         with ChangeCWD(pack.repo_path):
             runner = CliRunner(mix_stderr=False)
             result = runner.invoke(
-                main,
+                app,
                 [
                     VALIDATE_CMD,
+                    "--run-old-validate",
+                    "--skip-new-validate",
                     "-i",
                     layout.path,
                     "-s",
@@ -3476,16 +3778,13 @@ class TestLayoutValidation:
             )
         assert all(
             [
-                str_in_call_args_list(logger_info.call_args_list, current_str)
+                current_str in result.output
                 for current_str in [
                     f"Validating {layout.path} as layout",
                     "LO106",
+                    "the following scripts were not found in the id_set.json",
                 ]
             ]
-        )
-        assert str_in_call_args_list(
-            logger_error.call_args_list,
-            "the following scripts were not found in the id_set.json",
         )
         assert result.exit_code == 1
 
@@ -3502,7 +3801,7 @@ class TestPlaybookValidation:
         Then
         - Ensure validate passes and identifies the file as a playbook.
         """
-        logger_info = mocker.patch.object(logging.getLogger("demisto-sdk"), "info")
+
         mocker.patch.object(tools, "is_external_repository", return_value=True)
         mocker.patch.object(PlaybookValidator, "is_script_id_valid", return_value=True)
         mocker.patch.object(
@@ -3510,9 +3809,11 @@ class TestPlaybookValidation:
         )
         runner = CliRunner(mix_stderr=False)
         result = runner.invoke(
-            main,
+            app,
             [
                 VALIDATE_CMD,
+                "--run-old-validate",
+                "--skip-new-validate",
                 "-i",
                 VALID_PLAYBOOK_FILE_PATH,
                 "--allow-skipped",
@@ -3522,7 +3823,7 @@ class TestPlaybookValidation:
         )
         assert all(
             [
-                str_in_call_args_list(logger_info.call_args_list, current_str)
+                current_str in result.output
                 for current_str in [
                     f"Validating {VALID_PLAYBOOK_FILE_PATH} as playbook",
                     "The files are valid",
@@ -3542,15 +3843,16 @@ class TestPlaybookValidation:
         Then
         - Ensure validate fails on PB103 - unconnected tasks error.
         """
-        logger_info = mocker.patch.object(logging.getLogger("demisto-sdk"), "info")
-        logger_error = mocker.patch.object(logging.getLogger("demisto-sdk"), "error")
+
         mocker.patch.object(tools, "is_external_repository", return_value=True)
         with ChangeCWD(TEST_FILES_PATH):
             runner = CliRunner(mix_stderr=False)
             result = runner.invoke(
-                main,
+                app,
                 [
                     VALIDATE_CMD,
+                    "--run-old-validate",
+                    "--skip-new-validate",
                     "-i",
                     INVALID_PLAYBOOK_FILE_PATH,
                     "--allow-skipped",
@@ -3559,15 +3861,12 @@ class TestPlaybookValidation:
                 catch_exceptions=False,
             )
 
-        assert str_in_call_args_list(
-            logger_info.call_args_list,
-            f"Validating {INVALID_PLAYBOOK_FILE_PATH} as playbook",
-        )
         assert all(
-            str_in_call_args_list(logger_error.call_args_list, current_str)
+            current_str in result.output
             for current_str in [
                 "PB103",
                 "The following tasks ids have no previous tasks: {'5'}",
+                f"Validating {INVALID_PLAYBOOK_FILE_PATH} as playbook",
             ]
         )
         assert result.exit_code == 1
@@ -3585,14 +3884,16 @@ class TestPlaybookValidateDeprecated:
         Then
         - Ensure validate passes and identifies the file as a playbook deprecated.
         """
-        logger_info = mocker.patch.object(logging.getLogger("demisto-sdk"), "info")
+
         mocker.patch.object(tools, "is_external_repository", return_value=True)
         mocker.patch.object(PlaybookValidator, "is_script_id_valid", return_value=True)
         runner = CliRunner(mix_stderr=False)
         result = runner.invoke(
-            main,
+            app,
             [
                 VALIDATE_CMD,
+                "--run-old-validate",
+                "--skip-new-validate",
                 "-i",
                 VALID_DEPRECATED_PLAYBOOK_FILE_PATH,
                 "--no-conf-json",
@@ -3602,7 +3903,7 @@ class TestPlaybookValidateDeprecated:
         )
         assert all(
             [
-                str_in_call_args_list(logger_info.call_args_list, current_str)
+                current_str in result.output
                 for current_str in [
                     f"Validating {VALID_DEPRECATED_PLAYBOOK_FILE_PATH} as playbook",
                     "The files are valid",
@@ -3622,15 +3923,16 @@ class TestPlaybookValidateDeprecated:
         Then
         - Ensure validate fails on PB104 - deprecated tasks error.
         """
-        logger_info = mocker.patch.object(logging.getLogger("demisto-sdk"), "info")
-        logger_error = mocker.patch.object(logging.getLogger("demisto-sdk"), "error")
+
         mocker.patch.object(tools, "is_external_repository", return_value=True)
         with ChangeCWD(TEST_FILES_PATH):
             runner = CliRunner(mix_stderr=False)
             result = runner.invoke(
-                main,
+                app,
                 [
                     VALIDATE_CMD,
+                    "--run-old-validate",
+                    "--skip-new-validate",
                     "-i",
                     INVALID_DEPRECATED_PLAYBOOK_FILE_PATH,
                     "--no-conf-json",
@@ -3638,13 +3940,13 @@ class TestPlaybookValidateDeprecated:
                 ],
                 catch_exceptions=False,
             )
-        assert str_in_call_args_list(
-            logger_info.call_args_list,
-            f"Validating {INVALID_DEPRECATED_PLAYBOOK_FILE_PATH} as playbook",
-        )
         assert all(
-            str_in_call_args_list(logger_error.call_args_list, current_str)
-            for current_str in ["PB104", "Deprecated."]
+            current_str in result.output
+            for current_str in [
+                "PB104",
+                "Deprecated.",
+                f"Validating {INVALID_DEPRECATED_PLAYBOOK_FILE_PATH} as playbook",
+            ]
         )
         assert result.exit_code == 1
 
@@ -3659,7 +3961,7 @@ class TestPlaybookValidateDeprecated:
         Then
         - Ensure validate passes and identifies the file as a playbook deprecated.
         """
-        logger_info = mocker.patch.object(logging.getLogger("demisto-sdk"), "info")
+
         mocker.patch.object(tools, "is_external_repository", return_value=True)
         mocker.patch.object(PlaybookValidator, "is_script_id_valid", return_value=True)
         pack = repo.create_pack("PackName")
@@ -3670,15 +3972,22 @@ class TestPlaybookValidateDeprecated:
         with ChangeCWD(pack.repo_path):
             runner = CliRunner(mix_stderr=False)
             result = runner.invoke(
-                main,
-                [VALIDATE_CMD, "-i", playbook.yml.rel_path, "--print-ignored-files"],
+                app,
+                [
+                    VALIDATE_CMD,
+                    "--run-old-validate",
+                    "--skip-new-validate",
+                    "-i",
+                    playbook.yml.rel_path,
+                    "--print-ignored-files",
+                ],
                 catch_exceptions=False,
             )
         assert all(
             [
-                str_in_call_args_list(logger_info.call_args_list, current_str)
+                current_str in result.output
                 for current_str in [
-                    f"{playbook.yml.path} as playbook",
+                    f"{playbook.yml.rel_path} as playbook",
                     "The files are valid",
                 ]
             ]
@@ -3696,7 +4005,7 @@ class TestPlaybookValidateDeprecated:
         Then
         - Ensure validate passes and identifies the file as a playbook deprecated.
         """
-        logger_info = mocker.patch.object(logging.getLogger("demisto-sdk"), "info")
+
         mocker.patch.object(tools, "is_external_repository", return_value=True)
         mocker.patch.object(PlaybookValidator, "is_script_id_valid", return_value=True)
         mocker.patch.object(BaseValidator, "check_file_flags", return_value="")
@@ -3727,9 +4036,11 @@ class TestPlaybookValidateDeprecated:
         with ChangeCWD(pack.repo_path):
             runner = CliRunner(mix_stderr=False)
             result = runner.invoke(
-                main,
+                app,
                 [
                     VALIDATE_CMD,
+                    "--run-old-validate",
+                    "--skip-new-validate",
                     "-g",
                     "--print-ignored-files",
                     "--skip-pack-release-notes",
@@ -3738,7 +4049,7 @@ class TestPlaybookValidateDeprecated:
             )
         assert all(
             [
-                str_in_call_args_list(logger_info.call_args_list, current_str)
+                current_str in result.output
                 for current_str in [
                     f"Validating {playbook.yml.rel_path} as playbook",
                     "The files are valid",
@@ -3759,7 +4070,7 @@ class TestPlaybookValidateDeprecated:
         Then
         - Ensure validate passes and identifies the file as a playbook deprecated.
         """
-        logger_info = mocker.patch.object(logging.getLogger("demisto-sdk"), "info")
+
         mocker.patch.object(tools, "is_external_repository", return_value=True)
         mocker.patch.object(PlaybookValidator, "is_script_id_valid", return_value=True)
         pack = repo.create_pack("PackName")
@@ -3770,15 +4081,22 @@ class TestPlaybookValidateDeprecated:
         with ChangeCWD(pack.repo_path):
             runner = CliRunner(mix_stderr=False)
             result = runner.invoke(
-                main,
-                [VALIDATE_CMD, "-i", playbook.yml.rel_path, "--print-ignored-files"],
+                app,
+                [
+                    VALIDATE_CMD,
+                    "--run-old-validate",
+                    "--skip-new-validate",
+                    "-i",
+                    playbook.yml.rel_path,
+                    "--print-ignored-files",
+                ],
                 catch_exceptions=False,
             )
         assert all(
             [
-                str_in_call_args_list(logger_info.call_args_list, current_str)
+                current_str in result.output
                 for current_str in [
-                    f"{playbook.yml.path} as playbook",
+                    f"{playbook.yml.rel_path} as playbook",
                     "The files are valid",
                 ]
             ]
@@ -3797,7 +4115,7 @@ class TestPlaybookValidateDeprecated:
         Then
         - Ensure validate passes and identifies the file as a playbook deprecated.
         """
-        logger_info = mocker.patch.object(logging.getLogger("demisto-sdk"), "info")
+
         mocker.patch.object(tools, "is_external_repository", return_value=True)
         mocker.patch.object(PlaybookValidator, "is_script_id_valid", return_value=True)
         mocker.patch.object(BaseValidator, "check_file_flags", return_value="")
@@ -3828,9 +4146,11 @@ class TestPlaybookValidateDeprecated:
         with ChangeCWD(pack.repo_path):
             runner = CliRunner(mix_stderr=False)
             result = runner.invoke(
-                main,
+                app,
                 [
                     VALIDATE_CMD,
+                    "--run-old-validate",
+                    "--skip-new-validate",
                     "-g",
                     "--print-ignored-files",
                     "--skip-pack-release-notes",
@@ -3839,7 +4159,7 @@ class TestPlaybookValidateDeprecated:
             )
         assert all(
             [
-                str_in_call_args_list(logger_info.call_args_list, current_str)
+                current_str in result.output
                 for current_str in [
                     f"Validating {playbook.yml.rel_path} as playbook",
                     "The files are valid",
@@ -3861,18 +4181,26 @@ class TestReportValidation:
         Then
         - Ensure validate passes and identifies the file as a report.
         """
-        logger_info = mocker.patch.object(logging.getLogger("demisto-sdk"), "info")
+
         mocker.patch.object(tools, "is_external_repository", return_value=True)
         pack = repo.create_pack("PackName")
         report = pack._create_json_based(name="report", prefix="", content=REPORT)
         with ChangeCWD(pack.repo_path):
             runner = CliRunner(mix_stderr=False)
             result = runner.invoke(
-                main, [VALIDATE_CMD, "-i", report.path], catch_exceptions=False
+                app,
+                [
+                    VALIDATE_CMD,
+                    "--run-old-validate",
+                    "--skip-new-validate",
+                    "-i",
+                    report.path,
+                ],
+                catch_exceptions=False,
             )
         assert all(
             [
-                str_in_call_args_list(logger_info.call_args_list, current_str)
+                current_str in result.output
                 for current_str in [
                     f"Validating {report.path} as report",
                     "The files are valid",
@@ -3892,8 +4220,7 @@ class TestReportValidation:
         Then
         - Ensure validate fails on wrong orientation value.
         """
-        logger_info = mocker.patch.object(logging.getLogger("demisto-sdk"), "info")
-        logger_error = mocker.patch.object(logging.getLogger("demisto-sdk"), "error")
+
         mocker.patch.object(tools, "is_external_repository", return_value=True)
         pack = repo.create_pack("PackName")
         report_copy = REPORT.copy()
@@ -3902,14 +4229,18 @@ class TestReportValidation:
         with ChangeCWD(pack.repo_path):
             runner = CliRunner(mix_stderr=False)
             result = runner.invoke(
-                main, [VALIDATE_CMD, "-i", report.path], catch_exceptions=False
+                app,
+                [
+                    VALIDATE_CMD,
+                    "--run-old-validate",
+                    "--skip-new-validate",
+                    "-i",
+                    report.path,
+                ],
+                catch_exceptions=False,
             )
-        assert str_in_call_args_list(
-            logger_info.call_args_list, f"Validating {report.path} as report"
-        )
-        assert str_in_call_args_list(
-            logger_error.call_args_list, "The value \"bla\" in 'orientation' is invalid"
-        )
+        assert f"Validating {report.path} as report" in result.output
+        assert "The value \"bla\" in 'orientation' is invalid" in result.output
         assert result.exit_code == 1
 
 
@@ -3925,7 +4256,7 @@ class TestReputationValidation:
         Then
         - Ensure validate passes and identifies the file as a reputation.
         """
-        logger_info = mocker.patch.object(logging.getLogger("demisto-sdk"), "info")
+
         mocker.patch.object(tools, "is_external_repository", return_value=True)
         pack = repo.create_pack("PackName")
         reputation = pack._create_json_based(
@@ -3934,11 +4265,19 @@ class TestReputationValidation:
         with ChangeCWD(pack.repo_path):
             runner = CliRunner(mix_stderr=False)
             result = runner.invoke(
-                main, [VALIDATE_CMD, "-i", reputation.path], catch_exceptions=False
+                app,
+                [
+                    VALIDATE_CMD,
+                    "--run-old-validate",
+                    "--skip-new-validate",
+                    "-i",
+                    reputation.path,
+                ],
+                catch_exceptions=False,
             )
         assert all(
             [
-                str_in_call_args_list(logger_info.call_args_list, current_str)
+                current_str in result.output
                 for current_str in [
                     f"Validating {reputation.path} as reputation",
                     "The files are valid",
@@ -3958,8 +4297,7 @@ class TestReputationValidation:
         Then
         - Ensure validate fails on RP101 - wrong value in expiration field.
         """
-        logger_info = mocker.patch.object(logging.getLogger("demisto-sdk"), "info")
-        logger_error = mocker.patch.object(logging.getLogger("demisto-sdk"), "error")
+
         mocker.patch.object(tools, "is_external_repository", return_value=True)
         pack = repo.create_pack("PackName")
         reputation_copy = REPUTATION.copy()
@@ -3970,16 +4308,22 @@ class TestReputationValidation:
         with ChangeCWD(pack.repo_path):
             runner = CliRunner(mix_stderr=False)
             result = runner.invoke(
-                main, [VALIDATE_CMD, "-i", reputation.path], catch_exceptions=False
+                app,
+                [
+                    VALIDATE_CMD,
+                    "--run-old-validate",
+                    "--skip-new-validate",
+                    "-i",
+                    reputation.path,
+                ],
+                catch_exceptions=False,
             )
-        str_in_call_args_list(
-            logger_info.call_args_list, f"Validating {reputation.path} as reputation"
-        )
         assert all(
-            str_in_call_args_list(logger_error.call_args_list, current_str)
+            current_str in result.output
             for current_str in [
                 "RP101",
                 "Expiration field should have a positive numeric value.",
+                f"Validating {reputation.path} as reputation",
             ]
         )
         assert result.exit_code == 1
@@ -3997,7 +4341,7 @@ class TestScriptValidation:
         Then
         - Ensure validate passes and identifies the file as a script.
         """
-        logger_info = mocker.patch.object(logging.getLogger("demisto-sdk"), "info")
+
         mocker.patch.object(tools, "is_external_repository", return_value=True)
         pack = repo.create_pack("PackName")
         valid_script_yml = get_yaml(VALID_SCRIPT_PATH)
@@ -4005,15 +4349,22 @@ class TestScriptValidation:
         with ChangeCWD(pack.repo_path):
             runner = CliRunner(mix_stderr=False)
             result = runner.invoke(
-                main,
-                [VALIDATE_CMD, "-i", script.yml.rel_path, "--no-docker-checks"],
+                app,
+                [
+                    VALIDATE_CMD,
+                    "--run-old-validate",
+                    "--skip-new-validate",
+                    "-i",
+                    script.yml.rel_path,
+                    "--no-docker-checks",
+                ],
                 catch_exceptions=False,
             )
         assert all(
             [
-                str_in_call_args_list(logger_info.call_args_list, current_str)
+                current_str in result.output
                 for current_str in [
-                    f"{script.yml.path} as script",
+                    f"{script.yml.rel_path} as script",
                     "The files are valid",
                 ]
             ]
@@ -4031,8 +4382,7 @@ class TestScriptValidation:
         Then
         - Ensure validate fails on SC100 wrong v2 format in name.
         """
-        logger_info = mocker.patch.object(logging.getLogger("demisto-sdk"), "info")
-        logger_error = mocker.patch.object(logging.getLogger("demisto-sdk"), "error")
+
         mocker.patch.object(tools, "is_external_repository", return_value=True)
         mocker.patch.object(BaseValidator, "check_file_flags", return_value="")
         pack = repo.create_pack("PackName")
@@ -4042,19 +4392,24 @@ class TestScriptValidation:
         with ChangeCWD(pack.repo_path):
             runner = CliRunner(mix_stderr=False)
             result = runner.invoke(
-                main,
-                [VALIDATE_CMD, "-i", script.yml.rel_path, "--no-docker-checks"],
+                app,
+                [
+                    VALIDATE_CMD,
+                    "--run-old-validate",
+                    "--skip-new-validate",
+                    "-i",
+                    script.yml.rel_path,
+                    "--no-docker-checks",
+                ],
                 catch_exceptions=False,
             )
-        assert str_in_call_args_list(
-            logger_info.call_args_list, f"{script.yml.path} as script"
-        )
         assert all(
             [
-                str_in_call_args_list(logger_error.call_args_list, current_str)
+                current_str in result.output
                 for current_str in [
                     "SC100",
                     "The name of this v2 script is incorrect",
+                    f"{script.yml.rel_path} as script",
                 ]
             ]
         )
@@ -4073,27 +4428,34 @@ class TestScriptDeprecatedValidation:
         Then
         - Ensure validate passes and identifies the file as a deprecated script.
         """
-        logger_info = mocker.patch.object(logging.getLogger("demisto-sdk"), "info")
+
         mocker.patch.object(tools, "is_external_repository", return_value=True)
         pack = repo.create_pack("PackName")
         valid_script_yml = get_yaml(VALID_SCRIPT_PATH)
         valid_script_yml["deprecated"] = True
-        valid_script_yml[
-            "comment"
-        ] = "Deprecated. Use the EntryWidgetNumberHostsXDR v2 script instead."
+        valid_script_yml["comment"] = (
+            "Deprecated. Use the EntryWidgetNumberHostsXDR v2 script instead."
+        )
         script = pack.create_script(yml=valid_script_yml)
         with ChangeCWD(pack.repo_path):
             runner = CliRunner(mix_stderr=False)
             result = runner.invoke(
-                main,
-                [VALIDATE_CMD, "-i", script.yml.rel_path, "--no-docker-checks"],
+                app,
+                [
+                    VALIDATE_CMD,
+                    "--run-old-validate",
+                    "--skip-new-validate",
+                    "-i",
+                    script.yml.rel_path,
+                    "--no-docker-checks",
+                ],
                 catch_exceptions=False,
             )
         assert all(
             [
-                str_in_call_args_list(logger_info.call_args_list, current_str)
+                current_str in result.output
                 for current_str in [
-                    f"{script.yml.path} as script",
+                    f"{script.yml.rel_path} as script",
                     "The files are valid",
                 ]
             ]
@@ -4111,8 +4473,7 @@ class TestScriptDeprecatedValidation:
         Then
         - Ensure validate fails on SC101 wrong deprecated script.
         """
-        logger_info = mocker.patch.object(logging.getLogger("demisto-sdk"), "info")
-        logger_error = mocker.patch.object(logging.getLogger("demisto-sdk"), "error")
+
         mocker.patch.object(tools, "is_external_repository", return_value=True)
         mocker.patch.object(BaseValidator, "check_file_flags", return_value="")
         pack = repo.create_pack("PackName")
@@ -4122,18 +4483,23 @@ class TestScriptDeprecatedValidation:
         with ChangeCWD(pack.repo_path):
             runner = CliRunner(mix_stderr=False)
             result = runner.invoke(
-                main,
-                [VALIDATE_CMD, "-i", script.yml.rel_path, "--no-docker-checks"],
+                app,
+                [
+                    VALIDATE_CMD,
+                    "-i",
+                    script.yml.rel_path,
+                    "--no-docker-checks",
+                    "--run-old-validate",
+                    "--skip-new-validate",
+                ],
                 catch_exceptions=False,
             )
-        assert str_in_call_args_list(
-            logger_info.call_args_list, f"{script.yml.path} as script"
-        )
         assert all(
-            str_in_call_args_list(logger_error.call_args_list, current_str)
+            current_str in result.output
             for current_str in [
                 "SC101",
                 "Deprecated.",
+                f"{script.yml.rel_path} as script",
             ]
         )
         assert result.exit_code == 1
@@ -4149,22 +4515,24 @@ class TestScriptDeprecatedValidation:
         Then
         - Ensure validate passes and identifies the file as a deprecated script.
         """
-        logger_info = mocker.patch.object(logging.getLogger("demisto-sdk"), "info")
+
         mocker.patch.object(tools, "is_external_repository", return_value=True)
         pack = repo.create_pack("PackName")
         valid_script_yml = get_yaml(VALID_SCRIPT_PATH)
         valid_script_yml["deprecated"] = True
         valid_script_yml["commonfields"]["version"] = -2
-        valid_script_yml[
-            "comment"
-        ] = "Deprecated. Use the EntryWidgetNumberHostsXDR v2 script instead."
+        valid_script_yml["comment"] = (
+            "Deprecated. Use the EntryWidgetNumberHostsXDR v2 script instead."
+        )
         script = pack.create_script(yml=valid_script_yml)
         with ChangeCWD(pack.repo_path):
             runner = CliRunner(mix_stderr=False)
             result = runner.invoke(
-                main,
+                app,
                 [
                     VALIDATE_CMD,
+                    "--run-old-validate",
+                    "--skip-new-validate",
                     "-i",
                     script.yml.rel_path,
                     "--no-docker-checks",
@@ -4174,9 +4542,9 @@ class TestScriptDeprecatedValidation:
             )
         assert all(
             [
-                str_in_call_args_list(logger_info.call_args_list, current_str)
+                current_str in result.output
                 for current_str in [
-                    f"{script.yml.path} as script",
+                    f"{script.yml.rel_path} as script",
                     "The files are valid",
                 ]
             ]
@@ -4194,7 +4562,7 @@ class TestScriptDeprecatedValidation:
         Then
         - Ensure validate passes and identifies the file as a deprecated script.
         """
-        logger_info = mocker.patch.object(logging.getLogger("demisto-sdk"), "info")
+
         mocker.patch.object(tools, "is_external_repository", return_value=True)
         mocker.patch.object(BaseValidator, "check_file_flags", return_value="")
         mocker.patch.object(
@@ -4209,9 +4577,9 @@ class TestScriptDeprecatedValidation:
         valid_script_yml = get_yaml(VALID_SCRIPT_PATH)
         valid_script_yml["deprecated"] = True
         valid_script_yml["commonfields"]["version"] = -2
-        valid_script_yml[
-            "comment"
-        ] = "Deprecated. Use the EntryWidgetNumberHostsXDR v2 script instead."
+        valid_script_yml["comment"] = (
+            "Deprecated. Use the EntryWidgetNumberHostsXDR v2 script instead."
+        )
         script = pack.create_script(yml=valid_script_yml)
         modified_files = {script.yml.rel_path}
         mocker.patch.object(
@@ -4228,9 +4596,11 @@ class TestScriptDeprecatedValidation:
         with ChangeCWD(pack.repo_path):
             runner = CliRunner(mix_stderr=False)
             result = runner.invoke(
-                main,
+                app,
                 [
                     VALIDATE_CMD,
+                    "--run-old-validate",
+                    "--skip-new-validate",
                     "-g",
                     "-i",
                     script.yml.rel_path,
@@ -4242,7 +4612,7 @@ class TestScriptDeprecatedValidation:
             )
         assert all(
             [
-                str_in_call_args_list(logger_info.call_args_list, current_str)
+                current_str in result.output
                 for current_str in [
                     f"Validating {script.yml.rel_path} as script",
                     "The files are valid",
@@ -4262,7 +4632,7 @@ class TestScriptDeprecatedValidation:
         Then
         - Ensure validate passes and identifies the file as a script.
         """
-        logger_info = mocker.patch.object(logging.getLogger("demisto-sdk"), "info")
+
         mocker.patch.object(tools, "is_external_repository", return_value=True)
         pack = repo.create_pack("PackName")
         valid_script_yml = get_yaml(VALID_SCRIPT_PATH)
@@ -4272,9 +4642,11 @@ class TestScriptDeprecatedValidation:
         with ChangeCWD(pack.repo_path):
             runner = CliRunner(mix_stderr=False)
             result = runner.invoke(
-                main,
+                app,
                 [
                     VALIDATE_CMD,
+                    "--run-old-validate",
+                    "--skip-new-validate",
                     "-i",
                     script.yml.rel_path,
                     "--no-docker-checks",
@@ -4284,9 +4656,9 @@ class TestScriptDeprecatedValidation:
             )
         assert all(
             [
-                str_in_call_args_list(logger_info.call_args_list, current_str)
+                current_str in result.output
                 for current_str in [
-                    f"{script.yml.path} as script",
+                    f"{script.yml.rel_path} as script",
                     "The files are valid",
                 ]
             ]
@@ -4304,7 +4676,7 @@ class TestScriptDeprecatedValidation:
         Then
         - Ensure validate passes and identifies the file as a script.
         """
-        logger_info = mocker.patch.object(logging.getLogger("demisto-sdk"), "info")
+
         mocker.patch.object(tools, "is_external_repository", return_value=True)
         mocker.patch.object(BaseValidator, "check_file_flags", return_value="")
         mocker.patch.object(
@@ -4335,19 +4707,21 @@ class TestScriptDeprecatedValidation:
         with ChangeCWD(pack.repo_path):
             runner = CliRunner(mix_stderr=False)
             result = runner.invoke(
-                main,
+                app,
                 [
                     VALIDATE_CMD,
                     "-g",
                     "--no-docker-checks",
                     "--print-ignored-files",
                     "--skip-pack-release-notes",
+                    "--run-old-validate",
+                    "--skip-new-validate",
                 ],
                 catch_exceptions=False,
             )
         assert all(
             [
-                str_in_call_args_list(logger_info.call_args_list, current_str)
+                current_str in result.output
                 for current_str in [
                     f"Validating {script.yml.rel_path} as script",
                     "The files are valid",
@@ -4369,18 +4743,26 @@ class TestWidgetValidation:
         Then
         - Ensure validate passes and identifies the file as a widget.
         """
-        logger_info = mocker.patch.object(logging.getLogger("demisto-sdk"), "info")
+
         mocker.patch.object(tools, "is_external_repository", return_value=True)
         pack = repo.create_pack("PackName")
         widget = pack._create_json_based(name="widget", prefix="", content=WIDGET)
         with ChangeCWD(pack.repo_path):
             runner = CliRunner(mix_stderr=False)
             result = runner.invoke(
-                main, [VALIDATE_CMD, "-i", widget.path], catch_exceptions=False
+                app,
+                [
+                    VALIDATE_CMD,
+                    "-i",
+                    widget.path,
+                    "--run-old-validate",
+                    "--skip-new-validate",
+                ],
+                catch_exceptions=False,
             )
         assert all(
             [
-                str_in_call_args_list(logger_info.call_args_list, current_str)
+                current_str in result.output
                 for current_str in [
                     f"Validating {widget.path} as widget",
                     "The files are valid",
@@ -4400,8 +4782,7 @@ class TestWidgetValidation:
         Then
         - Ensure validate fails on - BA100 wrong version error.
         """
-        logger_info = mocker.patch.object(logging.getLogger("demisto-sdk"), "info")
-        logger_error = mocker.patch.object(logging.getLogger("demisto-sdk"), "error")
+
         mocker.patch.object(tools, "is_external_repository", return_value=True)
         pack = repo.create_pack("PackName")
         widget_copy = WIDGET.copy()
@@ -4410,20 +4791,28 @@ class TestWidgetValidation:
         with ChangeCWD(pack.repo_path):
             runner = CliRunner(mix_stderr=False)
             result = runner.invoke(
-                main, [VALIDATE_CMD, "-i", widget.path], catch_exceptions=False
+                app,
+                [
+                    VALIDATE_CMD,
+                    "--run-old-validate",
+                    "--skip-new-validate",
+                    "-i",
+                    widget.path,
+                ],
+                catch_exceptions=False,
             )
         assert all(
             [
-                str_in_call_args_list(logger_info.call_args_list, current_str)
+                current_str in result.output
                 for current_str in [
                     f"Validating {widget.path} as widget",
                     "BA100",
                 ]
             ]
         )
-        assert str_in_call_args_list(
-            logger_error.call_args_list,
-            "The version for our files should always be -1, please update the file.",
+        assert (
+            "The version for our files should always be -1, please update the file."
+            in result.output
         )
         assert result.exit_code == 1
 
@@ -4440,7 +4829,7 @@ class TestImageValidation:
         Then
         - Ensure validate passes and identifies the file as an image.
         """
-        logger_info = mocker.patch.object(logging.getLogger("demisto-sdk"), "info")
+
         mocker.patch.object(tools, "is_external_repository", return_value=True)
         pack = repo.create_pack("PackName")
         integration = pack.create_integration()
@@ -4448,11 +4837,19 @@ class TestImageValidation:
         with ChangeCWD(pack.repo_path):
             runner = CliRunner(mix_stderr=False)
             result = runner.invoke(
-                main, [VALIDATE_CMD, "-i", image_path], catch_exceptions=False
+                app,
+                [
+                    VALIDATE_CMD,
+                    "--run-old-validate",
+                    "--skip-new-validate",
+                    "-i",
+                    image_path,
+                ],
+                catch_exceptions=False,
             )
         assert all(
             [
-                str_in_call_args_list(logger_info.call_args_list, current_str)
+                current_str in result.output
                 for current_str in [
                     f"Validating {image_path} as image",
                     "The files are valid",
@@ -4472,8 +4869,7 @@ class TestImageValidation:
         Then
         - Ensure validate fails on error IM106 - default image error.
         """
-        logger_info = mocker.patch.object(logging.getLogger("demisto-sdk"), "info")
-        logger_error = mocker.patch.object(logging.getLogger("demisto-sdk"), "error")
+
         mocker.patch.object(tools, "is_external_repository", return_value=True)
         mocker.patch.object(BaseValidator, "check_file_flags", return_value="")
         pack = repo.create_pack("PackName")
@@ -4485,16 +4881,21 @@ class TestImageValidation:
         with ChangeCWD(pack.repo_path):
             runner = CliRunner(mix_stderr=False)
             result = runner.invoke(
-                main, [VALIDATE_CMD, "-i", image_path], catch_exceptions=False
+                app,
+                [
+                    VALIDATE_CMD,
+                    "--run-old-validate",
+                    "--skip-new-validate",
+                    "-i",
+                    image_path,
+                ],
+                catch_exceptions=False,
             )
-        assert str_in_call_args_list(
-            logger_info.call_args_list,
-            f"Validating {image_path} as image",
-        )
+        assert f"Validating {image_path} as image" in result.output
 
         assert all(
             [
-                str_in_call_args_list(logger_error.call_args_list, current_str)
+                current_str in result.output
                 for current_str in [
                     "IM106",
                     "This is the default image, please change to the integration image.",
@@ -4514,19 +4915,24 @@ class TestImageValidation:
         Then
         - Ensure validate does not validates it as an image.
         """
-        logger_error = mocker.patch.object(logging.getLogger("demisto-sdk"), "error")
+
         mocker.patch.object(tools, "is_external_repository", return_value=True)
         mocker.patch.object(BaseValidator, "check_file_flags", return_value="")
         pack = repo.create_pack("PackName")
         with ChangeCWD(pack.repo_path):
             runner = CliRunner(mix_stderr=False)
             result = runner.invoke(
-                main, [VALIDATE_CMD, "-i", NOT_VALID_IMAGE_PATH], catch_exceptions=False
+                app,
+                [
+                    VALIDATE_CMD,
+                    "--run-old-validate",
+                    "--skip-new-validate",
+                    "-i",
+                    NOT_VALID_IMAGE_PATH,
+                ],
+                catch_exceptions=False,
             )
-
-        assert str_in_call_args_list(
-            logger_error.call_args_list, "The image file name or location is invalid"
-        )
+        assert "The image file name or location is invalid" in result.output
         assert result.exit_code == 1
 
     def test_invalid_image_size(self, repo, mocker):
@@ -4540,8 +4946,7 @@ class TestImageValidation:
         Then
         - Ensure validate fails on dimensions error and asks to change the image.
         """
-        logger_info = mocker.patch.object(logging.getLogger("demisto-sdk"), "info")
-        logger_error = mocker.patch.object(logging.getLogger("demisto-sdk"), "error")
+
         pack = repo.create_pack("PackName")
         with open(
             f"{git_path()}/demisto_sdk/tests/integration_tests/Tests/invalid_integration_image.png",
@@ -4553,14 +4958,20 @@ class TestImageValidation:
         with ChangeCWD(pack.repo_path):
             runner = CliRunner(mix_stderr=False)
             result = runner.invoke(
-                main, [VALIDATE_CMD, "-i", image_path], catch_exceptions=False
+                app,
+                [
+                    VALIDATE_CMD,
+                    "--run-old-validate",
+                    "--skip-new-validate",
+                    "-i",
+                    image_path,
+                ],
+                catch_exceptions=False,
             )
-        assert str_in_call_args_list(
-            logger_info.call_args_list, f"Validating {image_path} as image"
-        )
+        assert f"Validating {image_path} as image" in result.output
         assert all(
             [
-                str_in_call_args_list(logger_error.call_args_list, current_str)
+                current_str in result.output
                 for current_str in [
                     "IM111",
                     "IM101",
@@ -4584,7 +4995,7 @@ class TestAuthorImageValidation:
         Then
         - Ensure validate passes.
         """
-        logger_info = mocker.patch.object(logging.getLogger("demisto-sdk"), "info")
+
         mocker.patch.object(tools, "is_external_repository", return_value=True)
         pack = repo.create_pack("PackName")
         pack.pack_metadata.write_json(
@@ -4608,19 +5019,18 @@ class TestAuthorImageValidation:
         with ChangeCWD(repo.path):
             runner = CliRunner(mix_stderr=False)
             result = runner.invoke(
-                main,
-                [VALIDATE_CMD, "-i", pack.author_image.path],
+                app,
+                [
+                    VALIDATE_CMD,
+                    "--run-old-validate",
+                    "--skip-new-validate",
+                    "-i",
+                    pack.author_image.path,
+                ],
                 catch_exceptions=False,
             )
 
-        assert all(
-            [
-                str_in_call_args_list(logger_info.call_args_list, current_str)
-                for current_str in [
-                    f"Validating {pack.author_image.path} as author_image",
-                ]
-            ]
-        )
+        assert f"Validating {pack.author_image.path} as author_image" in result.output
         assert result.exit_code == 0
 
     def test_author_image_invalid(self, repo, mocker):
@@ -4634,7 +5044,7 @@ class TestAuthorImageValidation:
         Then
         - Ensure validate fails on error IM108 - empty author image error.
         """
-        logger_info = mocker.patch.object(logging.getLogger("demisto-sdk"), "info")
+
         mocker.patch.object(tools, "is_external_repository", return_value=True)
         mocker.patch.object(ImageValidator, "load_image", return_value="")
         pack = repo.create_pack("PackName")
@@ -4659,12 +5069,20 @@ class TestAuthorImageValidation:
         with ChangeCWD(repo.path):
             runner = CliRunner(mix_stderr=False)
             result = runner.invoke(
-                main, [VALIDATE_CMD, "-i", author_image_path], catch_exceptions=False
+                app,
+                [
+                    VALIDATE_CMD,
+                    "--run-old-validate",
+                    "--skip-new-validate",
+                    "-i",
+                    author_image_path,
+                ],
+                catch_exceptions=False,
             )
 
         assert all(
             [
-                str_in_call_args_list(logger_info.call_args_list, current_str)
+                current_str in result.output
                 for current_str in [
                     f"Validating {author_image_path} as author_image",
                     "IM108",
@@ -4686,7 +5104,7 @@ class TestAllFilesValidator:
         Then
         - Ensure validate passes on all files.
         """
-        logger_info = mocker.patch.object(logging.getLogger("demisto-sdk"), "info")
+
         mocker.patch.object(tools, "is_external_repository", return_value=False)
         mocker.patch.object(
             PackUniqueFilesValidator, "are_valid_files", return_value=""
@@ -4720,9 +5138,11 @@ class TestAllFilesValidator:
         with ChangeCWD(repo.path):
             runner = CliRunner(mix_stderr=False)
             result = runner.invoke(
-                main,
+                app,
                 [
                     VALIDATE_CMD,
+                    "--run-old-validate",
+                    "--skip-new-validate",
                     "-a",
                     "--no-docker-checks",
                     "--no-conf-json",
@@ -4734,7 +5154,7 @@ class TestAllFilesValidator:
 
         assert all(
             [
-                str_in_call_args_list(logger_info.call_args_list, current_str)
+                current_str in result.output
                 for current_str in [
                     "Validating all files",
                     "Validating Packs/PackName1 unique pack files",
@@ -4761,8 +5181,7 @@ class TestAllFilesValidator:
         Then
         - Ensure validate fails.
         """
-        logger_info = mocker.patch.object(logging.getLogger("demisto-sdk"), "info")
-        logger_error = mocker.patch.object(logging.getLogger("demisto-sdk"), "error")
+
         mocker.patch.object(tools, "is_external_repository", return_value=False)
         mocker.patch.object(
             PackUniqueFilesValidator, "are_valid_files", return_value=""
@@ -4793,21 +5212,22 @@ class TestAllFilesValidator:
         mocker.patch.object(ReadMeValidator, "is_docker_available", return_value=False)
 
         with ChangeCWD(repo.path):
-            runner = CliRunner(mix_stderr=False)
-            result = runner.invoke(
-                main,
+            result = CliRunner(mix_stderr=False).invoke(
+                app,
                 [
                     VALIDATE_CMD,
                     "-a",
                     "--no-docker-checks",
                     "--no-conf-json",
                     "--no-multiprocessing",
+                    "--run-old-validate",
+                    "--skip-new-validate",
                 ],
                 catch_exceptions=False,
             )
-
+        assert result.exit_code == 1
         assert all(
-            str_in_call_args_list(logger_info.call_args_list, current_str)
+            current_str in result.output
             for current_str in [
                 "Validating all files",
                 "Validating Packs/PackName1 unique pack files",
@@ -4820,17 +5240,10 @@ class TestAllFilesValidator:
                 "IF101",
                 "SC100",
                 "RM111",
-            ]
-        )
-        assert all(
-            str_in_call_args_list(logger_error.call_args_list, current_str)
-            for current_str in [
                 "The content key must be set to True.",
                 "The name of this v2 script is incorrect",
             ]
         )
-
-        assert result.exit_code == 1
 
 
 class TestValidationUsingGit:
@@ -4845,7 +5258,7 @@ class TestValidationUsingGit:
         Then
         - Ensure validate passes on all files.
         """
-        logger_info = mocker.patch.object(logging.getLogger("demisto-sdk"), "info")
+
         mocker.patch.object(tools, "is_external_repository", return_value=False)
         mocker.patch.object(
             PackUniqueFilesValidator, "are_valid_files", return_value=""
@@ -4903,9 +5316,11 @@ class TestValidationUsingGit:
         with ChangeCWD(repo.path):
             runner = CliRunner(mix_stderr=False)
             result = runner.invoke(
-                main,
+                app,
                 [
                     VALIDATE_CMD,
+                    "--run-old-validate",
+                    "--skip-new-validate",
                     "-g",
                     "--no-docker-checks",
                     "--no-conf-json",
@@ -4915,7 +5330,7 @@ class TestValidationUsingGit:
             )
         assert all(
             [
-                str_in_call_args_list(logger_info.call_args_list, current_str)
+                current_str in result.output
                 for current_str in [
                     "Running validation on branch",
                     "Running validation on modified files",
@@ -4945,8 +5360,7 @@ class TestValidationUsingGit:
         Then
         - Ensure validate fails.
         """
-        logger_info = mocker.patch.object(logging.getLogger("demisto-sdk"), "info")
-        logger_error = mocker.patch.object(logging.getLogger("demisto-sdk"), "error")
+
         mocker.patch.object(tools, "is_external_repository", return_value=False)
         mocker.patch.object(
             PackUniqueFilesValidator, "are_valid_files", return_value=""
@@ -4993,9 +5407,11 @@ class TestValidationUsingGit:
         with ChangeCWD(repo.path):
             runner = CliRunner(mix_stderr=False)
             result = runner.invoke(
-                main,
+                app,
                 [
                     VALIDATE_CMD,
+                    "--run-old-validate",
+                    "--skip-new-validate",
                     "-g",
                     "--no-docker-checks",
                     "--no-conf-json",
@@ -5005,7 +5421,7 @@ class TestValidationUsingGit:
             )
 
         assert all(
-            str_in_call_args_list(logger_info.call_args_list, current_str)
+            current_str in result.output
             for current_str in [
                 "Running validation on branch",
                 "Running validation on modified files",
@@ -5022,7 +5438,7 @@ class TestValidationUsingGit:
             ]
         )
         assert all(
-            str_in_call_args_list(logger_error.call_args_list, err_msg)
+            err_msg in result.output
             for err_msg in [
                 "The name of this v2 script is incorrect",
                 "The content key must be set to True.",
@@ -5042,7 +5458,7 @@ class TestValidationUsingGit:
         - Ensure validate fails.
         - Ensure pack dependencies check doesnt happen.
         """
-        logger_info = mocker.patch.object(logging.getLogger("demisto-sdk"), "info")
+
         pack = repo.create_pack("FeedAzure")
         integration = pack.create_integration(
             name="FeedAzure",
@@ -5076,9 +5492,11 @@ class TestValidationUsingGit:
         with ChangeCWD(repo.path):
             runner = CliRunner(mix_stderr=False)
             result = runner.invoke(
-                main,
+                app,
                 [
                     VALIDATE_CMD,
+                    "--run-old-validate",
+                    "--skip-new-validate",
                     "-g",
                     "--no-docker-checks",
                     "--no-conf-json",
@@ -5089,7 +5507,7 @@ class TestValidationUsingGit:
             )
         assert all(
             [
-                str_in_call_args_list(logger_info.call_args_list, current_str)
+                current_str in result.output
                 for current_str in [
                     "Running validation on branch",
                     "Running validation on modified files",
@@ -5099,9 +5517,7 @@ class TestValidationUsingGit:
                 ]
             ]
         )
-        assert not str_in_call_args_list(
-            logger_info.call_args_list, "Running pack dependencies validation on"
-        )
+        assert "Running pack dependencies validation on" not in result.output
         assert result.exit_code == 1
 
     def test_validation_using_git_with_pack_dependencies(self, mocker, repo):
@@ -5116,7 +5532,7 @@ class TestValidationUsingGit:
         - Ensure validate fails.
         - Ensure pack dependencies check happens.
         """
-        logger_info = mocker.patch.object(logging.getLogger("demisto-sdk"), "info")
+
         pack = repo.create_pack("FeedAzure")
         integration = pack.create_integration(
             name="FeedAzure",
@@ -5152,9 +5568,11 @@ class TestValidationUsingGit:
         with ChangeCWD(repo.path):
             runner = CliRunner(mix_stderr=False)
             result = runner.invoke(
-                main,
+                app,
                 [
                     VALIDATE_CMD,
+                    "--run-old-validate",
+                    "--skip-new-validate",
                     "-g",
                     "--no-docker-checks",
                     "--no-conf-json",
@@ -5164,7 +5582,7 @@ class TestValidationUsingGit:
             )
         assert all(
             [
-                str_in_call_args_list(logger_info.call_args_list, current_str)
+                current_str in result.output
                 for current_str in [
                     "Running pack dependencies validation on",
                 ]
@@ -5175,7 +5593,7 @@ class TestValidationUsingGit:
     def test_validation_non_content_path(self):
         """
         Given
-        - non content pack path file, file not existing.
+        - non-content pack path file, file not existing.
 
         When
         - Running demisto-sdk validate command.
@@ -5185,9 +5603,11 @@ class TestValidationUsingGit:
         """
         runner = CliRunner(mix_stderr=False)
         result = runner.invoke(
-            main,
+            app,
             [
                 VALIDATE_CMD,
+                "--run-old-validate",
+                "--skip-new-validate",
                 "-i",
                 join("Users", "MyPacks", "VMware"),
                 "--no-docker-checks",
@@ -5203,7 +5623,7 @@ class TestValidationUsingGit:
     def test_validation_non_content_path_mocked_repo(self, mocker, repo):
         """
         Given
-        - non content pack path file, file existing.
+        - non-content pack path file, file existing.
 
         When
         - Running demisto-sdk validate command.
@@ -5212,7 +5632,7 @@ class TestValidationUsingGit:
         Then
         - Ensure an error is raised on the non found file
         """
-        logger_info = mocker.patch.object(logging.getLogger("demisto-sdk"), "info")
+
         mocker.patch.object(tools, "is_external_repository", return_value=False)
         mocker.patch.object(OldValidateManager, "setup_git_params", return_value=True)
         mocker.patch.object(PackDependencies, "find_dependencies", return_value={})
@@ -5230,9 +5650,11 @@ class TestValidationUsingGit:
         with ChangeCWD(repo.path):
             runner = CliRunner(mix_stderr=False)
             result = runner.invoke(
-                main,
+                app,
                 [
                     VALIDATE_CMD,
+                    "--run-old-validate",
+                    "--skip-new-validate",
                     "-g",
                     "--no-docker-checks",
                     "--no-conf-json",
@@ -5242,15 +5664,7 @@ class TestValidationUsingGit:
             )
 
         assert result.exit_code == 1
-        # check error str is in stdout
-        assert all(
-            [
-                str_in_call_args_list(logger_info.call_args_list, current_str)
-                for current_str in [
-                    "You may not be running",
-                ]
-            ]
-        )
+        assert "You may not be running" in result.output
 
     def test_validation_using_git_on_specific_file(self, mocker, repo):
         """
@@ -5264,7 +5678,7 @@ class TestValidationUsingGit:
         - Ensure the integration is validated.
         - Ensure the script is not validated.
         """
-        logger_info = mocker.patch.object(logging.getLogger("demisto-sdk"), "info")
+
         pack = repo.create_pack("FeedAzure")
         integration = pack.create_integration()
         integration.create_default_integration()
@@ -5298,8 +5712,8 @@ class TestValidationUsingGit:
 
         with ChangeCWD(repo.path):
             runner = CliRunner(mix_stderr=False)
-            runner.invoke(
-                main,
+            result = runner.invoke(
+                app,
                 [
                     VALIDATE_CMD,
                     "-g",
@@ -5308,22 +5722,21 @@ class TestValidationUsingGit:
                     "--skip-pack-release-notes",
                     "-i",
                     integration.yml.rel_path,
+                    "--run-old-validate",
+                    "--skip-new-validate",
                 ],
                 catch_exceptions=False,
             )
-
         assert all(
             [
-                str_in_call_args_list(logger_info.call_args_list, current_str)
+                current_str in result.output
                 for current_str in [
                     "Running on committed and staged files",
                     f"Validating {integration.yml.rel_path}",
                 ]
             ]
         )
-        assert not str_in_call_args_list(
-            logger_info.call_args_list, f"Validating {script.yml.rel_path}"
-        )
+        assert f"Validating {script.yml.rel_path}" not in result.output
 
     def test_validation_using_git_on_specific_file_renamed(self, mocker, repo):
         """
@@ -5337,7 +5750,7 @@ class TestValidationUsingGit:
         - Ensure the integration is validated.
         - Ensure the script is not validated.
         """
-        logger_info = mocker.patch.object(logging.getLogger("demisto-sdk"), "info")
+
         pack = repo.create_pack("FeedAzure")
         integration = pack.create_integration()
         integration.create_default_integration()
@@ -5374,10 +5787,12 @@ class TestValidationUsingGit:
 
         with ChangeCWD(repo.path):
             runner = CliRunner(mix_stderr=False)
-            runner.invoke(
-                main,
+            result = runner.invoke(
+                app,
                 [
                     VALIDATE_CMD,
+                    "--run-old-validate",
+                    "--skip-new-validate",
                     "-g",
                     "--no-docker-checks",
                     "--no-conf-json",
@@ -5387,19 +5802,9 @@ class TestValidationUsingGit:
                 ],
                 catch_exceptions=False,
             )
-
-        assert all(
-            [
-                str_in_call_args_list(logger_info.call_args_list, current_str)
-                for current_str in [
-                    "Running on committed and staged files",
-                    f"Validating {integration.yml.rel_path}",
-                ]
-            ]
-        )
-        assert not str_in_call_args_list(
-            logger_info.call_args_list, f"Validating {script.yml.rel_path}"
-        )
+        assert "Running on committed and staged files" in result.output
+        assert f"Validating {integration.yml.rel_path}" in result.output
+        assert f"Validating {script.yml.rel_path}" not in result.output
 
     def test_validation_using_git_on_specific_pack(self, mocker, repo):
         """
@@ -5413,7 +5818,7 @@ class TestValidationUsingGit:
         - Ensure the entities in pack 1 are validated
         - Ensure the entities in pack 2 are not validated.
         """
-        logger_info = mocker.patch.object(logging.getLogger("demisto-sdk"), "info")
+
         pack_1 = repo.create_pack("Pack1")
         integration = pack_1.create_integration()
         integration.create_default_integration()
@@ -5460,37 +5865,26 @@ class TestValidationUsingGit:
         mocker.patch.object(GitUtil, "deleted_files", return_value={})
 
         with ChangeCWD(repo.path):
-            runner = CliRunner(mix_stderr=False)
-            runner.invoke(
-                main,
+            result = CliRunner(mix_stderr=False).invoke(
+                app,
                 [
                     VALIDATE_CMD,
+                    "--run-old-validate",
+                    "--skip-new-validate",
                     "-g",
                     "--no-docker-checks",
                     "--no-conf-json",
                     "--skip-pack-release-notes",
                     "-i",
-                    pack_1.path,
+                    str(pack_1.path),
                 ],
                 catch_exceptions=False,
             )
-
-        assert all(
-            [
-                str_in_call_args_list(logger_info.call_args_list, current_str)
-                for current_str in [
-                    "Running on committed and staged files",
-                    f"Validating {integration.yml.rel_path}",
-                    f"Validating {script.yml.rel_path}",
-                ]
-            ]
-        )
-        str_in_call_args_list(
-            logger_info.call_args_list, f"Validating {integration_2.yml.rel_path}"
-        )
-        str_in_call_args_list(
-            logger_info.call_args_list, f"Validating {script_2.yml.rel_path}"
-        )
+        assert "Running on committed and staged files" in result.output
+        assert f"Validating {integration.yml.rel_path}" in result.output
+        assert f"Validating {script.yml.rel_path}" in result.output
+        assert f"Validating {integration_2.yml.rel_path}" not in result.output
+        assert f"Validating {script_2.yml.rel_path}" not in result.output
 
 
 class TestSpecificValidations:
@@ -5506,7 +5900,7 @@ class TestSpecificValidations:
         - Ensure validate doesn't fail on RP101 - wrong value in expiration field
         due to the flag.
         """
-        logger_info = mocker.patch.object(logging.getLogger("demisto-sdk"), "info")
+
         mocker.patch.object(tools, "is_external_repository", return_value=True)
         pack = repo.create_pack("PackName")
         reputation_copy = REPUTATION.copy()
@@ -5517,19 +5911,21 @@ class TestSpecificValidations:
         with ChangeCWD(pack.repo_path):
             runner = CliRunner(mix_stderr=False)
             result = runner.invoke(
-                main,
+                app,
                 [
                     VALIDATE_CMD,
                     "-i",
                     reputation.path,
                     "--run-specific-validations",
                     "BA101",
+                    "--run-old-validate",
+                    "--skip-new-validate",
                 ],
                 catch_exceptions=False,
             )
         assert all(
             [
-                str_in_call_args_list(logger_info.call_args_list, current_str)
+                current_str in result.output
                 for current_str in [
                     f"Validating {reputation.path} as reputation",
                     "The files are valid",
@@ -5549,8 +5945,6 @@ class TestSpecificValidations:
         Then
         - Ensure validate fails on RP101 - wrong value in expiration field and not on RP102 - id and details fields are not equal.
         """
-        logger_info = mocker.patch.object(logging.getLogger("demisto-sdk"), "info")
-        logger_error = mocker.patch.object(logging.getLogger("demisto-sdk"), "error")
         mocker.patch.object(tools, "is_external_repository", return_value=True)
         pack = repo.create_pack("PackName")
         reputation_copy = REPUTATION.copy()
@@ -5562,23 +5956,23 @@ class TestSpecificValidations:
         with ChangeCWD(pack.repo_path):
             runner = CliRunner(mix_stderr=False)
             result = runner.invoke(
-                main,
+                app,
                 [
                     VALIDATE_CMD,
                     "-i",
                     reputation.path,
                     "--run-specific-validations",
                     "RP101",
+                    "--run-old-validate",
+                    "--skip-new-validate",
                 ],
                 catch_exceptions=False,
             )
-        str_in_call_args_list(
-            logger_info.call_args_list, f"Validating {reputation.path} as reputation"
-        )
         assert all(
             [
-                str_in_call_args_list(logger_error.call_args_list, current_str)
+                current_str in result.output
                 for current_str in [
+                    f"Validating {reputation.path} as reputation",
                     "RP101",
                     "Expiration field should have a positive numeric value.",
                 ]
@@ -5599,8 +5993,7 @@ class TestSpecificValidations:
         Then
         - Ensure validate fails on RP101 - wrong value in expiration field and on RP102 - id and details fields are not equal.
         """
-        logger_info = mocker.patch.object(logging.getLogger("demisto-sdk"), "info")
-        logger_error = mocker.patch.object(logging.getLogger("demisto-sdk"), "error")
+
         mocker.patch.object(tools, "is_external_repository", return_value=True)
         pack = repo.create_pack("PackName")
         reputation_copy = REPUTATION.copy()
@@ -5612,9 +6005,11 @@ class TestSpecificValidations:
         with ChangeCWD(pack.repo_path):
             runner = CliRunner(mix_stderr=False)
             result = runner.invoke(
-                main,
+                app,
                 [
                     VALIDATE_CMD,
+                    "--run-old-validate",
+                    "--skip-new-validate",
                     "-i",
                     reputation.path,
                     "--run-specific-validations",
@@ -5622,19 +6017,15 @@ class TestSpecificValidations:
                 ],
                 catch_exceptions=False,
             )
-        str_in_call_args_list(
-            logger_info.call_args_list, f"Validating {reputation.path} as reputation"
-        )
-        assert all(
-            str_in_call_args_list(logger_error.call_args_list, current_str)
-            for current_str in [
-                "RP101",
-                "Expiration field should have a positive numeric value.",
-                "RP102",
-                "id and details fields are not equal.",
-            ]
-        )
-        assert result.exit_code == 1
+            assert f"Validating {reputation.path} as reputation" in result.output
+            assert "RP101" in result.output
+            assert (
+                "Expiration field should have a positive numeric value."
+                in result.output
+            )
+            assert "RP102" in result.output
+            assert "id and details fields are not equal." in result.output
+            assert result.exit_code == 1
 
 
 class TestBasicValidation:
@@ -5651,7 +6042,7 @@ class TestBasicValidation:
         Then
         - make sure the files are valid and that the errors can be ignored successfully.
         """
-        logger_info = mocker.patch.object(logging.getLogger("demisto-sdk"), "info")
+
         mocker.patch.object(tools, "is_external_repository", return_value=True)
         mocker.patch.object(BaseValidator, "check_file_flags", return_value="")
         mocker.patch.object(
@@ -5692,9 +6083,11 @@ class TestBasicValidation:
         with ChangeCWD(pack.repo_path):
             runner = CliRunner(mix_stderr=False)
             result = runner.invoke(
-                main,
+                app,
                 [
                     VALIDATE_CMD,
+                    "--run-old-validate",
+                    "--skip-new-validate",
                     "-g",
                     "--post-commit",
                     "--skip-pack-release-notes",
@@ -5702,7 +6095,7 @@ class TestBasicValidation:
                     "--no-conf-json",
                 ],
             )
-        assert str_in_call_args_list(logger_info.call_args_list, "The files are valid")
+        assert "The files are valid" in result.output
         assert result.exit_code == 0
 
 
@@ -5720,7 +6113,6 @@ def test_local_node_server_up_and_down():
 
     assert not mdx_server_is_up()
     with start_local_MDX_server():
-
         assert mdx_server_is_up()
         assert_successful_mdx_call()
     sleep(1)

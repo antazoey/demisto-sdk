@@ -1,4 +1,3 @@
-import logging
 import os
 import re
 from enum import Enum
@@ -6,9 +5,9 @@ from pathlib import Path
 from typing import List
 
 import pytest
-from click.testing import CliRunner, Result
+from typer.testing import CliRunner, Result
 
-from demisto_sdk import __main__
+from demisto_sdk.__main__ import app
 from demisto_sdk.commands.common.constants import FileType
 from demisto_sdk.commands.common.tools import (
     find_type,
@@ -24,10 +23,7 @@ from demisto_sdk.tests.integration_tests.validate_integration_test import (
 )
 from TestSuite.json_based import JSONBased
 from TestSuite.pack import Pack
-from TestSuite.test_tools import (
-    ChangeCWD,
-    str_in_call_args_list,
-)
+from TestSuite.test_tools import ChangeCWD
 
 
 class TestDocReviewFilesAreFound:
@@ -327,7 +323,6 @@ class TestDocReviewPack:
 
 
 class TestDocReviewXSOAROnly:
-
     """
     Tests for the `--xsoar-only` flag.
     """
@@ -335,7 +330,6 @@ class TestDocReviewXSOAROnly:
     default_args = ["--xsoar-only"]
 
     class CommandResultCode(Enum):
-
         """
         Holds result code for the execution of `doc-review` command.
         """
@@ -344,17 +338,15 @@ class TestDocReviewXSOAROnly:
         FAIL = 1
 
     def run_doc_review_cmd(self, cmd_args: List[str]) -> Result:
-
         """
         Uses the Click CLI runner to invoke a command with input arguments and returns the result
         """
 
         args: List[str] = self.default_args + cmd_args
 
-        return CliRunner().invoke(__main__.doc_review, args)
+        return CliRunner().invoke(app, ["doc-review", *args])
 
     def test_valid_supported_pack(self, supported_pack: Pack):
-
         """
         Given -
             An XSOAR-supported Pack with correct spelling.
@@ -376,7 +368,6 @@ class TestDocReviewXSOAROnly:
         assert result.exit_code == self.CommandResultCode.SUCCESS.value
 
     def test_valid_non_supported_pack(self, non_supported_pack: Pack):
-
         """
         Given -
             A non-XSOAR-supported Pack with correct spelling.
@@ -398,7 +389,6 @@ class TestDocReviewXSOAROnly:
         assert result.exit_code == self.CommandResultCode.SUCCESS.value
 
     def test_valid_multiple_supported_packs(self, supported_packs: List[Pack]):
-
         """
         Given -
             2 XSOAR-supported Packs with correct spelling.
@@ -420,7 +410,6 @@ class TestDocReviewXSOAROnly:
         assert result.exit_code == self.CommandResultCode.SUCCESS.value
 
     def test_invalid_non_supported_pack(self, non_supported_pack_mispelled: Pack):
-
         """
         Given -
             A non-XSOAR-supported Pack with incorrect spelling.
@@ -442,7 +431,6 @@ class TestDocReviewXSOAROnly:
         assert result.exit_code == self.CommandResultCode.SUCCESS.value
 
     def test_invalid_supported_pack(self, supported_pack_mispelled: Pack):
-
         """
         Given -
             A XSOAR-supported Pack with incorrect spelling.
@@ -464,7 +452,6 @@ class TestDocReviewXSOAROnly:
         assert result.exit_code == self.CommandResultCode.FAIL.value
 
     def test_invalid_mix_packs(self, mix_invalid_packs: List[Pack]):
-
         """
         Given -
             2 Packs, one community, one XSOAR-supported with incorrect spelling.
@@ -532,7 +519,7 @@ class TestDocReviewPrinting:
 
         doc_reviewer.print_file_report()
 
-    def test_printing_of_valid_spelled_files(self, mocker, monkeypatch):
+    def test_printing_of_valid_spelled_files(self, mocker, caplog):
         """
         Given -
             Files reported as valid spelled files.
@@ -543,14 +530,12 @@ class TestDocReviewPrinting:
         Then -
             Ensure only the files without misspells are printed.
         """
-        logger_info = mocker.patch.object(logging.getLogger("demisto-sdk"), "info")
-        monkeypatch.setenv("COLUMNS", "1000")
 
         self.get_file_report_mocker(files_type=self.SpelledFileType.VALID)
 
         assert all(
             [
-                str_in_call_args_list(logger_info.call_args_list, current_str)
+                current_str in caplog.text
                 for current_str in [
                     "Files Without Misspells",
                     "file1\nfile2",
@@ -558,11 +543,9 @@ class TestDocReviewPrinting:
             ]
         )
 
-        assert not str_in_call_args_list(
-            logger_info.call_args_list, "Files With Misspells"
-        )
+        assert "Files With Misspells" not in caplog.text
 
-    def test_printing_invalid_spelled_files(self, mocker, monkeypatch):
+    def test_printing_invalid_spelled_files(self, caplog):
         """
         Given -
             Files reported as invalid spelled files.
@@ -573,14 +556,12 @@ class TestDocReviewPrinting:
         Then -
             Ensure only the files with misspells are printed.
         """
-        logger_info = mocker.patch.object(logging.getLogger("demisto-sdk"), "info")
-        monkeypatch.setenv("COLUMNS", "1000")
 
         self.get_file_report_mocker(files_type=self.SpelledFileType.INVALID)
 
         assert all(
             [
-                str_in_call_args_list(logger_info.call_args_list, current_str)
+                current_str in caplog.text
                 for current_str in [
                     "Files With Misspells",
                     "file1\nfile2",
@@ -588,11 +569,9 @@ class TestDocReviewPrinting:
             ]
         )
 
-        assert not str_in_call_args_list(
-            logger_info.call_args_list, "Files Without Misspells"
-        )
+        assert "Files Without Misspells" not in caplog.text
 
-    def test_printing_malformed_release_notes(self, mocker, monkeypatch):
+    def test_printing_malformed_release_notes(self, caplog):
         """
         Given -
             Malformed release-note.
@@ -603,8 +582,6 @@ class TestDocReviewPrinting:
         Then -
             Ensure 'Malformed Release Notes' is printed.
         """
-        logger_info = mocker.patch.object(logging.getLogger("demisto-sdk"), "info")
-        monkeypatch.setenv("COLUMNS", "1000")
 
         self.get_file_report_mocker(
             files_type=self.SpelledFileType.INVALID_RELEASE_NOTES
@@ -612,7 +589,7 @@ class TestDocReviewPrinting:
 
         assert all(
             [
-                str_in_call_args_list(logger_info.call_args_list, current_str)
+                current_str in caplog.text
                 for current_str in [
                     "Malformed Release Notes",
                     "file1\nfile2",
@@ -620,7 +597,7 @@ class TestDocReviewPrinting:
             ]
         )
 
-    def test_printing_mixed_report(self, mocker, monkeypatch):
+    def test_printing_mixed_report(self, caplog):
         """
         Given -
             Files reported as both valid/invalid spelled files.
@@ -631,8 +608,6 @@ class TestDocReviewPrinting:
         Then -
             Ensure both files misspelled and correctly spelled files are printed.
         """
-        logger_info = mocker.patch.object(logging.getLogger("demisto-sdk"), "info")
-        monkeypatch.setenv("COLUMNS", "1000")
 
         self.get_file_report_mocker(
             files_type=self.SpelledFileType.BOTH_INVALID_AND_VALID
@@ -640,7 +615,7 @@ class TestDocReviewPrinting:
 
         assert all(
             [
-                str_in_call_args_list(logger_info.call_args_list, current_str)
+                current_str in caplog.text
                 for current_str in [
                     "Files Without Misspells",
                     "file1\nfile2",
@@ -670,11 +645,11 @@ class TestDocReviewPrinting:
         cmd_args: List[str] = []
         for pack in mix_invalid_packs:
             cmd_args.append("--input")
-            cmd_args.append(pack.path)
+            cmd_args.append(str(pack.path))
 
-            if is_xsoar_supported_pack(pack.path):
+            if is_xsoar_supported_pack(str(pack.path)):
                 expected_supported = (
-                    f"Words that might be misspelled were found in {pack.path}"
+                    f"Words that might be misspelled were found in {str(pack.path)}"
                 )
             else:
                 expected_not_supported_readme = f"File '{pack.readme.path}' was skipped because it does not belong to an XSOAR-supported Pack"
@@ -1341,11 +1316,11 @@ def test_find_known_words_from_pack_ignore_commons_scripts_name(repo):
     # add a yml script directly into Scripts folder
     pack._create_yaml_based(
         name=script1_name,
-        dir_path=f"{pack.path}//Scripts",
+        dir_path=f"{str(pack.path)}//Scripts",
         content={"name": script1_name},
     )
     # add a .md file script directly into Scripts folder
-    pack._create_text_based("bla.md", "", dir_path=Path(f"{pack.path}//Scripts"))
+    pack._create_text_based("bla.md", "", dir_path=Path(f"{str(pack.path)}//Scripts"))
     # add a script into second_script folder
     script2 = pack.create_script(name="second_script")
     rn_file = pack.create_release_notes(
@@ -1418,30 +1393,31 @@ def test_replace_escape_characters(sentence, expected):
 @pytest.mark.parametrize(
     "use_pack_known_words, expected_param_value",
     [
-        (["--use-packs-known-words"], True),
-        (["--skip-packs-known-words"], False),
-        ([""], True),
-        (["--skip-packs-known-words", "--use-packs-known-words"], True),
+        ("--use-packs-known-words", True),
+        ("--skip-packs-known-words", False),
     ],
 )
 def test_pack_known_word_arg(use_pack_known_words, expected_param_value, mocker):
     """
     Given:
-        - the --use-pack-known-words parameter
+        - the --use-packs-known-words parameter
     When:
         - running the doc-review command
     Then:
-        - Validate that given --use-packs-known-words" the load_known_words_from_pack is True
-        - Validate that given --skip-packs-known-words" the load_known_words_from_pack is False
+        - Validate that given --use-packs-known-words the load_known_words_from_pack is True
+        - Validate that given --skip-packs-known-words the load_known_words_from_pack is False
         - Validate that no param the default load_known_words_from_pack is True
         - Validate that given --use-packs-known-words and --skip-packs-known-words the load_known_words_from_pack is True
     """
     runner = CliRunner()
     mock_doc_reviewer = mocker.MagicMock(name="DocReviewer")
     mock_doc_reviewer.run_doc_review.return_value = True
-    m = mocker.patch(
-        "demisto_sdk.commands.doc_reviewer.doc_reviewer.DocReviewer",
+    from demisto_sdk.commands.doc_reviewer.doc_reviewer_setup import DocReviewer
+
+    m = mocker.patch.object(
+        DocReviewer,
+        "__init__",
         return_value=mock_doc_reviewer,
     )
-    runner.invoke(__main__.doc_review, use_pack_known_words)
+    runner.invoke(app, ["doc-review", use_pack_known_words])
     assert m.call_args.kwargs.get("load_known_words_from_pack") == expected_param_value

@@ -18,7 +18,7 @@ class PreProcessRuleValidator(ContentEntityValidator):
         structure_validator=True,
         ignored_errors=False,
         json_file_path=None,
-        **kwargs
+        **kwargs,
     ):
         super().__init__(
             structure_validator, ignored_errors, json_file_path=json_file_path, **kwargs
@@ -49,7 +49,7 @@ class PreProcessRuleValidator(ContentEntityValidator):
             )
         else:
             logger.info(
-                "[yellow]Skipping PreProcessRule id_set validations. Could not read id_set.json.[/yellow]"
+                "<yellow>Skipping PreProcessRule id_set validations. Could not read id_set.json.</yellow>"
             )
 
         return all(validations)
@@ -108,16 +108,17 @@ class PreProcessRuleValidator(ContentEntityValidator):
         ret_value: List[str] = []
 
         for current_section_item in self.current_file.get(section_name, []):
-            if current_section_item["left"]["isContext"]:
-                ret_value.append(current_section_item["left"]["value"]["simple"])
-            if current_section_item["right"]["isContext"]:
-                right_value_simple = str(
-                    current_section_item["right"]["value"]["simple"]
-                )
-                right_value_simple = PreProcessRuleValidator.get_field_name(
-                    right_value_simple
-                )
-                ret_value.append(right_value_simple)
+            if isinstance(current_section_item, dict):
+                current_section_item = list(current_section_item)
+            for item in current_section_item:
+                if item["left"]["isContext"]:
+                    ret_value.append(item["left"]["value"]["simple"])
+                if item["right"]["isContext"]:
+                    right_value_simple = str(item["right"]["value"]["simple"])
+                    right_value_simple = PreProcessRuleValidator.get_field_name(
+                        right_value_simple
+                    )
+                    ret_value.append(right_value_simple)
 
         return ret_value
 

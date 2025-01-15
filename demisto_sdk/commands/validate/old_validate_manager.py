@@ -20,7 +20,10 @@ from demisto_sdk.commands.common.constants import (
     GENERIC_FIELDS_DIR,
     GENERIC_TYPES_DIR,
     IGNORED_PACK_NAMES,
+    LISTS_DIR,
+    LOG_FILE_NAME,
     OLDEST_SUPPORTED_VERSION,
+    PACK_METADATA_REQUIRE_RN_FIELDS,
     PACKS_DIR,
     PACKS_PACK_META_FILE_NAME,
     SKIP_RELEASE_NOTES_FOR_TYPES,
@@ -45,6 +48,7 @@ from demisto_sdk.commands.common.errors import (
     get_all_error_codes,
 )
 from demisto_sdk.commands.common.git_util import GitUtil
+from demisto_sdk.commands.common.handlers import DEFAULT_JSON_HANDLER as json
 from demisto_sdk.commands.common.hook_validations.author_image import (
     AuthorImageValidator,
 )
@@ -142,7 +146,7 @@ from demisto_sdk.commands.common.hook_validations.xsiam_report import (
 from demisto_sdk.commands.common.hook_validations.xsoar_config_json import (
     XSOARConfigJsonValidator,
 )
-from demisto_sdk.commands.common.logger import get_log_file, logger
+from demisto_sdk.commands.common.logger import logger
 from demisto_sdk.commands.common.tools import (
     _get_file_id,
     detect_file_level,
@@ -313,6 +317,9 @@ class OldValidateManager:
             FileType.PEM,
             FileType.METADATA,
             FileType.VULTURE_WHITELIST,
+            FileType.CASE_LAYOUT_RULE,
+            FileType.CASE_LAYOUT,
+            FileType.CASE_FIELD,
         )
 
         self.is_external_repo = is_external_repo
@@ -364,23 +371,23 @@ class OldValidateManager:
             self.print_ignored_errors_report()
 
         if valid:
-            logger.info("\n[green]The files are valid[/green]")
+            logger.info("\n<green>The files are valid</green>")
             return 0
 
         else:
             all_failing_files = "\n".join(set(FOUND_FILES_AND_ERRORS))
             logger.info(
-                f"\n[red]=========== Found errors in the following files ===========\n\n{all_failing_files}[/red]\n"
+                f"\n<red>=========== Found errors in the following files ===========\n\n{all_failing_files}</red>\n"
             )
 
             if self.always_valid:
                 logger.info(
-                    "[yellow]Found the errors above, but not failing build[/yellow]"
+                    "<yellow>Found the errors above, but not failing build</yellow>"
                 )
                 return 0
 
             logger.info(
-                "[red]The files were found as invalid, the exact error message can be located above[/red]"
+                "<red>The files were found as invalid, the exact error message can be located above</red>"
             )
             return 1
 
@@ -412,7 +419,7 @@ class OldValidateManager:
 
             if file_level == PathLevel.FILE:
                 logger.info(
-                    f"\n[cyan]================= Validating file {path} =================[/cyan]"
+                    f"\n<cyan>================= Validating file {path} =================</cyan>"
                 )
                 files_validation_result.add(
                     self.run_validations_on_file(path, error_ignore_list)
@@ -420,7 +427,7 @@ class OldValidateManager:
 
             elif file_level == PathLevel.CONTENT_ENTITY_DIR:
                 logger.info(
-                    f"\n[cyan]================= Validating content directory {path} =================[/cyan]"
+                    f"\n<cyan>================= Validating content directory {path} =================</cyan>"
                 )
                 files_validation_result.add(
                     self.run_validation_on_content_entities(path, error_ignore_list)
@@ -428,7 +435,7 @@ class OldValidateManager:
 
             elif file_level == PathLevel.CONTENT_GENERIC_ENTITY_DIR:
                 logger.info(
-                    f"\n[cyan]================= Validating content directory {path} =================[/cyan]"
+                    f"\n<cyan>================= Validating content directory {path} =================</cyan>"
                 )
                 files_validation_result.add(
                     self.run_validation_on_generic_entities(path, error_ignore_list)
@@ -436,13 +443,13 @@ class OldValidateManager:
 
             elif file_level == PathLevel.PACK:
                 logger.info(
-                    f"\n[cyan]================= Validating pack {path} =================[/cyan]"
+                    f"\n<cyan>================= Validating pack {path} =================</cyan>"
                 )
                 files_validation_result.add(self.run_validations_on_pack(path)[0])
 
             else:
                 logger.info(
-                    f"\n[cyan]================= Validating package {path} =================[/cyan]"
+                    f"\n<cyan>================= Validating package {path} =================</cyan>"
                 )
                 files_validation_result.add(
                     self.run_validation_on_package(path, error_ignore_list)
@@ -450,7 +457,7 @@ class OldValidateManager:
 
         if self.validate_graph:
             logger.info(
-                "\n[cyan]================= Validating graph =================[/cyan]"
+                "\n<cyan>================= Validating graph =================</cyan>"
             )
             with GraphValidator(
                 specific_validations=self.specific_validations,
@@ -475,7 +482,7 @@ class OldValidateManager:
                 done_fn(result[0], result[1])
             except Exception as e:
                 logger.info(
-                    f"[red]An error occurred while tried to collect result, Error: {e}[/red]"
+                    f"<red>An error occurred while tried to collect result, Error: {e}</red>"
                 )
                 raise
 
@@ -486,7 +493,7 @@ class OldValidateManager:
             bool. true if all files are valid, false otherwise.
         """
         logger.info(
-            "\n[cyan]================= Validating all files =================[/cyan]"
+            "\n<cyan>================= Validating all files =================</cyan>"
         )
         all_packs_valid = set()
 
@@ -516,7 +523,6 @@ class OldValidateManager:
     def validate_packs(
         self, all_packs: list, all_packs_valid: set, count: int, num_of_packs: int
     ) -> bool:
-
         if self.run_with_multiprocessing:
             with pebble.ProcessPool(max_workers=cpu_count()) as executor:
                 futures = []
@@ -540,7 +546,7 @@ class OldValidateManager:
                 count += 1
         if self.validate_graph:
             logger.info(
-                "\n[cyan]================= Validating graph =================[/cyan]"
+                "\n<cyan>================= Validating graph =================</cyan>"
             )
             specific_validations_list = (
                 self.specific_validations if self.specific_validations else []
@@ -729,7 +735,7 @@ class OldValidateManager:
         return True
 
     def is_skipped_file(self, file_path: str) -> bool:
-        """check wether the file in the given file_path is in the SKIPPED_FILES list.
+        """check whether the file in the given file_path is in the 'SKIPPED_FILES' list.
 
         Args:
             file_path: the file on which to run.
@@ -738,10 +744,13 @@ class OldValidateManager:
             bool. true if file is in SKIPPED_FILES list, false otherwise.
         """
         path = Path(file_path)
-        if get_log_file() == path:
-            return True
-        return path.name in SKIPPED_FILES or (
-            path.name == "CommonServerPython.py" and path.parent.parent.name != "Base"
+        return (
+            path.name in SKIPPED_FILES + [LOG_FILE_NAME]
+            or (
+                path.name == "CommonServerPython.py"
+                and path.parent.parent.name != "Base"
+            )
+            or (LISTS_DIR in path.parts[-3:] and path.name.endswith("_data.json"))
         )
 
     # flake8: noqa: C901
@@ -781,7 +790,11 @@ class OldValidateManager:
         if (
             file_type in self.skipped_file_types
             or self.is_skipped_file(file_path)
-            or (self.git_util and self.git_util._is_file_git_ignored(file_path))
+            or (
+                self.use_git
+                and self.git_util
+                and self.git_util._is_file_git_ignored(file_path)
+            )
             or detect_file_level(file_path)
             in (PathLevel.PACKAGE, PathLevel.CONTENT_ENTITY_DIR)
         ):
@@ -803,10 +816,10 @@ class OldValidateManager:
             validation_print = f"\nValidating {file_path} as {file_type.value if file_type else 'unknown-file'}"
             if self.print_percent:
                 if FOUND_FILES_AND_ERRORS:
-                    validation_print += f" [red][{self.completion_percentage}%][/red]"
+                    validation_print += f" <red>[{self.completion_percentage}%]</red>"
                 else:
                     validation_print += (
-                        f" [green][{self.completion_percentage}%][/green]"
+                        f" <green>[{self.completion_percentage}%]</green>"
                     )
 
             logger.info(validation_print)
@@ -841,11 +854,8 @@ class OldValidateManager:
             return True
 
         # id_set validation
-        if (
-            self.id_set_validations
-            and not self.id_set_validations.is_file_valid_in_set(
-                file_path, file_type, pack_error_ignore_list
-            )
+        if self.id_set_validations and not self.id_set_validations.is_file_valid_in_set(
+            file_path, file_type, pack_error_ignore_list
         ):
             return False
 
@@ -864,12 +874,8 @@ class OldValidateManager:
             ):
                 valid_in_conf = False
 
-        # Note: these file are not ignored but there are no additional validators for connections
-        if file_type == FileType.CONNECTION:
-            return True
-
         # test playbooks and test scripts are using the same validation.
-        elif file_type in {FileType.TEST_PLAYBOOK, FileType.TEST_SCRIPT}:
+        if file_type in {FileType.TEST_PLAYBOOK, FileType.TEST_SCRIPT}:
             return self.validate_test_playbook(
                 structure_validator, pack_error_ignore_list
             )
@@ -883,7 +889,7 @@ class OldValidateManager:
                     pack_error_ignore_list,
                 )
             else:
-                logger.info("[yellow]Skipping release notes validation[/yellow]")
+                logger.info("<yellow>Skipping release notes validation</yellow>")
 
         elif file_type == FileType.RELEASE_NOTES_CONFIG:
             return self.validate_release_notes_config(file_path, pack_error_ignore_list)
@@ -1027,6 +1033,9 @@ class OldValidateManager:
             FileType.MODELING_RULE,
             FileType.MODELING_RULE_XIF,
             FileType.MODELING_RULE_TEST_DATA,
+            FileType.ASSETS_MODELING_RULE,
+            FileType.ASSETS_MODELING_RULE_XIF,
+            FileType.MODELING_RULE_TEST_DATA,
         ):
             logger.info(f"Validating {file_type.value} file: {file_path}")
             if self.validate_all:
@@ -1137,7 +1146,10 @@ class OldValidateManager:
         filtered_added_files: Set = set()
         filtered_old_format: Set = set()
 
-        for path in self.file_path.split(","):
+        if isinstance(self.file_path, str):
+            file_path = self.file_path.split(",")
+
+        for path in file_path:
             path = get_relative_path_from_packs_dir(path)
             file_level = detect_file_level(path)
             if file_level == PathLevel.FILE:
@@ -1210,17 +1222,17 @@ class OldValidateManager:
         )
         if old_format_files:
             logger.info(
-                "\n[cyan]================= Running validation on old format files =================[/cyan]"
+                "\n<cyan>================= Running validation on old format files =================</cyan>"
             )
             validation_results.add(self.validate_no_old_format(old_format_files))
-            logger.info("*** after adding validate_no_old_format")
+            logger.debug("added validate_no_old_format")
 
         if not self.skip_pack_rn_validation:
-            logger.info("*** adding validate_no_duplicated_release_notes")
+            logger.debug("adding validate_no_duplicated_release_notes")
             validation_results.add(
                 self.validate_no_duplicated_release_notes(added_files)
             )
-            logger.info("*** after adding validate_no_duplicated_release_notes")
+            logger.debug("added validate_no_duplicated_release_notes")
 
         all_files_set = list(
             set().union(
@@ -1229,7 +1241,7 @@ class OldValidateManager:
         )
         if self.validate_graph:
             logger.info(
-                "\n[cyan]================= Validating graph =================[/cyan]"
+                "\n<cyan>================= Validating graph =================</cyan>"
             )
             if all_files_set:
                 with GraphValidator(
@@ -1249,7 +1261,7 @@ class OldValidateManager:
 
         if self.packs_with_mp_change:
             logger.info(
-                "\n[cyan]================= Running validation on Marketplace Changed Packs =================[/cyan]"
+                "\n<cyan>================= Running validation on Marketplace Changed Packs =================</cyan>"
             )
             logger.debug(
                 f"Found marketplace change in the following packs: {self.packs_with_mp_change}"
@@ -1876,7 +1888,7 @@ class OldValidateManager:
         is_valid = job_validator.is_valid_file()
         if not is_valid:
             job_validator_errors = job_validator.get_errors()
-            logger.info(f"[red]{job_validator_errors}[/red]")
+            logger.info(f"<red>{job_validator_errors}</red>")
 
         return is_valid
 
@@ -1958,7 +1970,7 @@ class OldValidateManager:
 
     def validate_modified_files(self, modified_files):
         logger.info(
-            "\n[cyan]================= Running validation on modified files =================[/cyan]"
+            "\n<cyan>================= Running validation on modified files =================</cyan>"
         )
         valid_files = set()
         all_files_edited_in_pack_ignore = self.get_all_files_edited_in_pack_ignore(
@@ -1982,7 +1994,7 @@ class OldValidateManager:
 
     def validate_added_files(self, added_files, modified_files):
         logger.info(
-            "\n[cyan]================= Running validation on newly added files =================[/cyan]"
+            "\n<cyan>================= Running validation on newly added files =================</cyan>"
         )
 
         valid_files = set()
@@ -2057,7 +2069,7 @@ class OldValidateManager:
     @error_codes("BA115")
     def validate_deleted_files(self, deleted_files: set, added_files: set) -> bool:
         logger.info(
-            "\n[cyan]================= Checking for prohibited deleted files =================[/cyan]"
+            "\n<cyan>================= Checking for prohibited deleted files =================</cyan>"
         )
 
         is_valid = True
@@ -2096,7 +2108,7 @@ class OldValidateManager:
         self, modified_files, added_files, old_format_files, changed_meta_files
     ):
         logger.info(
-            "\n[cyan]================= Running validation on changed pack unique files =================[/cyan]"
+            "\n<cyan>================= Running validation on changed pack unique files =================</cyan>"
         )
         valid_pack_files = set()
 
@@ -2108,7 +2120,7 @@ class OldValidateManager:
 
         packs_that_should_have_version_raised = (
             self.get_packs_that_should_have_version_raised(
-                modified_files, added_files, old_format_files
+                modified_files, added_files, old_format_files, changed_meta_files
             )
         )
 
@@ -2165,7 +2177,7 @@ class OldValidateManager:
             bool. True if no duplications found, false otherwise
         """
         logger.info(
-            "\n[cyan]================= Verifying no duplicated release notes =================[/cyan]"
+            "\n<cyan>================= Verifying no duplicated release notes =================</cyan>"
         )
         added_rn = set()
         for file in added_files:
@@ -2184,7 +2196,7 @@ class OldValidateManager:
                     ):
                         return False
 
-        logger.info("\n[green]No duplicated release notes found.[/green]\n")
+        logger.info("\n<green>No duplicated release notes found.</green>\n")
         return True
 
     @error_codes("RN106")
@@ -2203,7 +2215,7 @@ class OldValidateManager:
             bool. True if no missing RN found, False otherwise
         """
         logger.info(
-            "\n[cyan]================= Checking for missing release notes =================[/cyan]\n"
+            "\n<cyan>================= Checking for missing release notes =================</cyan>\n"
         )
         packs_that_should_have_new_rn_api_module_related: set = set()
         # existing packs that have files changed (which are not RN, README nor test files) - should have new RN
@@ -2269,7 +2281,7 @@ class OldValidateManager:
             return all(is_valid)
 
         else:
-            logger.info("[green]No missing release notes found.[/green]\n")
+            logger.info("<green>No missing release notes found.</green>\n")
             return True
 
     """ ######################################## Git Tools and filtering ####################################### """
@@ -2307,8 +2319,8 @@ class OldValidateManager:
         ):
             non_existing_remote = self.prev_ver.split("/")[0]
             logger.info(
-                f"[red]Could not find remote {non_existing_remote} reverting to "
-                f"{str(self.git_util.repo.remote())}[/red]"
+                f"<red>Could not find remote {non_existing_remote} reverting to "
+                f"{str(self.git_util.repo.remote())}</red>"
             )
             self.prev_ver = self.prev_ver.replace(
                 non_existing_remote, str(self.git_util.repo.remote())
@@ -2339,7 +2351,7 @@ class OldValidateManager:
 
     def print_git_config(self):
         logger.info(
-            f"\n[cyan]================= Running validation on branch {self.branch_name} =================[/cyan]"
+            f"\n<cyan>================= Running validation on branch {self.branch_name} =================</cyan>"
         )
         if not self.no_configuration_prints:
             logger.info(f"Validating against {self.prev_ver}")
@@ -2512,7 +2524,7 @@ class OldValidateManager:
             except FileNotFoundError:
                 if file_path not in self.ignored_files:
                     if self.print_ignored_files:
-                        logger.info(f"[yellow]ignoring file {file_path}[/yellow]")
+                        logger.info(f"<yellow>ignoring file {file_path}</yellow>")
                     self.ignored_files.add(file_path)
 
         return filtered_set, old_format_files, all(valid_types)
@@ -2563,6 +2575,7 @@ class OldValidateManager:
             FileType.XIF_FILE,
             FileType.MODELING_RULE_XIF,
             FileType.PARSING_RULE_XIF,
+            FileType.ASSETS_MODELING_RULE_XIF,
         ]:
             if not (
                 str(file_path).endswith("_test.py")
@@ -2650,7 +2663,7 @@ class OldValidateManager:
 
     def ignore_file(self, file_path: str) -> None:
         if self.print_ignored_files:
-            logger.info(f"[yellow]ignoring file {file_path}[/yellow]")
+            logger.info(f"<yellow>ignoring file {file_path}</yellow>")
         self.ignored_files.add(file_path)
 
     """ ######################################## Validate Tools ############################################### """
@@ -2739,18 +2752,18 @@ class OldValidateManager:
     def print_ignored_errors_report(self):
         all_ignored_errors = "\n".join(FOUND_FILES_AND_IGNORED_ERRORS)
         logger.info(
-            f"\n[yellow]=========== Found ignored errors "
-            f"in the following files ===========\n\n{all_ignored_errors}[/yellow]"
+            f"\n<yellow>=========== Found ignored errors "
+            f"in the following files ===========\n\n{all_ignored_errors}</yellow>"
         )
 
     def print_ignored_files_report(self):
         all_ignored_files = "\n".join(list(self.ignored_files))
         logger.info(
-            f"\n[yellow]=========== Ignored the following files ===========\n\n{all_ignored_files}[/yellow]"
+            f"\n<yellow>=========== Ignored the following files ===========\n\n{all_ignored_files}</yellow>"
         )
 
     def get_packs_that_should_have_version_raised(
-        self, modified_files, added_files, old_format_files
+        self, modified_files, added_files, old_format_files, changed_meta_files
     ):
         # modified packs (where the change is not test-playbook, test-script, readme, metadata file, release notes or
         # doc/author images)
@@ -2768,6 +2781,16 @@ class OldValidateManager:
                 FileType.PACK_IGNORE,
             },
         )
+        if changed_meta_files:
+            modified_packs_that_should_have_version_raised = (
+                modified_packs_that_should_have_version_raised.union(
+                    get_pack_names_from_files(
+                        self.get_changed_meta_files_that_should_have_version_raised(
+                            changed_meta_files
+                        )
+                    )
+                )
+            )
 
         # also existing packs with added files which are not test-playbook, test-script readme or release notes
         # should have their version raised
@@ -2881,3 +2904,27 @@ class OldValidateManager:
 
             return is_valid_as_deprecated
         return None
+
+    def get_changed_meta_files_that_should_have_version_raised(
+        self, changed_meta_files
+    ):
+        """
+        Check if specified fields have changed in each meta_file to determine if it should have its version raised.
+
+        Args:
+            changed_meta_files (set): set of file paths of the changed meta files.
+
+        Returns:
+            set: A set containing file paths of meta_files that should have their version raised.
+        """
+        changed_meta_files_that_should_have_version_raised = set()
+        for file_path in changed_meta_files:
+            old_meta_file_content = get_remote_file(file_path, tag=self.prev_ver)
+            with open(file_path) as f:
+                current_meta_file_content = json.load(f)
+            if any(
+                current_meta_file_content.get(field) != old_meta_file_content.get(field)
+                for field in PACK_METADATA_REQUIRE_RN_FIELDS
+            ):
+                changed_meta_files_that_should_have_version_raised.add(file_path)
+        return changed_meta_files_that_should_have_version_raised
