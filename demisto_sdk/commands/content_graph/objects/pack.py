@@ -1,5 +1,7 @@
 import shutil
 from collections import defaultdict
+from configparser import ConfigParser
+from configparser import Error as ConfigParserError
 from functools import cached_property
 from pathlib import Path
 from tempfile import TemporaryDirectory
@@ -16,15 +18,22 @@ from demisto_sdk.commands.common.constants import (
     DEFAULT_CONTENT_ITEM_FROM_VERSION,
     MANDATORY_PACK_METADATA_FIELDS,
     MARKETPLACE_MIN_VERSION,
+    PACKS_PACK_IGNORE_FILE_NAME,
     ImagesFolderNames,
     MarketplaceVersions,
 )
 from demisto_sdk.commands.common.content_constant_paths import CONTENT_PATH
+from demisto_sdk.commands.common.git_util import (
+    CommitOrBranchNotFoundError,
+    GitFileNotFoundError,
+    GitUtil,
+)
 from demisto_sdk.commands.common.logger import logger
 from demisto_sdk.commands.common.tools import (
     MarketplaceTagParser,
     get_file,
     get_relative_path,
+    parse_ignore_list,
     write_dict,
 )
 from demisto_sdk.commands.content_graph.common import (
@@ -166,6 +175,104 @@ class Pack(BaseContent, PackMetadata, content_type=ContentType.PACK):
             return ignored_errors
         file_path = get_relative_path(self.path, CONTENT_PATH)
         return self.get_ignored_errors(file_path / PACK_METADATA_FILENAME)
+
+    @cached_property
+    def pack_level_ignored_errors(self) -> List[str]:
+        """Error codes listed under the [pack] section of `.pack-ignore`.
+
+        Codes returned here are ignored for the pack itself and for every
+        content item belonging to it (including their related files).
+        """
+        section = self.ignored_errors_dict.get("pack")
+        if section is None:
+            return []
+        for key, value in section.items():
+            if key == "ignore":
+                return parse_ignore_list(value)
+        return []
+
+    def old_pack_level_ignored_errors(self, prev_ver: Optional[str]) -> List[str]:
+        """The [pack]-section error codes from `.pack-ignore` as of `prev_ver`.
+
+        Reads the previous version straight from git (the parsed
+        `pack_level_ignored_errors` only reflects the working tree, so it can't
+        be used as the "before" side of a diff).
+
+        Args:
+            prev_ver: the git ref to read the old file from (branch,
+                `remote/branch`, or sha). None means "no previous version".
+
+        Returns:
+            The old [pack] codes, or [] when `prev_ver` is None, the file did
+            not exist at that ref, or it had no [pack] section.
+        """
+        if not prev_ver:
+            return []
+        git_util = GitUtil.from_content_path()
+        pack_ignore_path = self.path / PACKS_PACK_IGNORE_FILE_NAME
+        old_text = self._read_pack_ignore_at_ref(git_util, pack_ignore_path, prev_ver)
+        if old_text is None:
+            return []
+        try:
+            config = ConfigParser(allow_no_value=True)
+            config.read_string(old_text)
+        except ConfigParserError as e:
+            # The old `.pack-ignore` at `prev_ver` is malformed INI. This is an
+            # expected, data-driven failure (bad committed file), not a bug, so
+            # we treat the old [pack] section as empty rather than crash.
+            logger.debug(
+                f"Malformed old .pack-ignore for {self.object_id} at {prev_ver}: {e}"
+            )
+            return []
+        if config.has_section("pack"):
+            for key in config["pack"]:
+                if key == "ignore":
+                    return parse_ignore_list(config["pack"][key])
+        return []
+
+    @staticmethod
+    def _read_pack_ignore_at_ref(
+        git_util: GitUtil, pack_ignore_path: Path, prev_ver: str
+    ) -> Optional[str]:
+        """Read `.pack-ignore` text at `prev_ver`, tolerating fork/offline setups.
+
+        Resolves `prev_ver` via `handle_prev_ver`, then reads the remote ref
+        first and falls back to the local ref, so the baseline is still found
+        when the remote is behind (forks) or unreachable (offline).
+
+        Args:
+            git_util: the GitUtil used to resolve refs and read file content.
+            pack_ignore_path: path to the pack's `.pack-ignore` file.
+            prev_ver: the git ref to read from (branch, `remote/branch`, or sha).
+
+        Returns:
+            The file text, or None if it does not exist at that ref.
+        """
+        remote, branch = git_util.handle_prev_ver(prev_ver)
+        ref = f"{remote}/{branch}" if remote else branch
+        for candidate_ref, from_remote in ((ref, True), (branch, False)):
+            try:
+                if git_util.is_file_exist_in_commit_or_branch(
+                    pack_ignore_path, candidate_ref, from_remote
+                ):
+                    return git_util.read_file_content(
+                        pack_ignore_path, candidate_ref, from_remote
+                    ).decode("utf-8")
+            except (
+                CommitOrBranchNotFoundError,
+                GitFileNotFoundError,
+                UnicodeDecodeError,
+            ) as e:
+                # Expected, data-driven reasons this candidate ref can't be read:
+                # the ref/commit doesn't exist here (common on forks/offline for
+                # the remote candidate), the file isn't present at that ref, or
+                # its bytes aren't valid UTF-8. Any of these just means "try the
+                # next candidate / no old file"; unexpected errors propagate.
+                logger.debug(
+                    f"Could not read {pack_ignore_path} at {candidate_ref} "
+                    f"(from_remote={from_remote}): {e}"
+                )
+        return None
 
     def ignored_errors_related_files(self, file_path: Path) -> List[str]:
         if ignored_errors := self.get_ignored_errors((Path(file_path)).name):
